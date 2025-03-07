@@ -1,3 +1,10 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include "naive_bayes.h"
+#include "mnist_loader.h"
+
 //basic naive bayes implementation 
 
 void initNaiveBayes(NaiveBayesModel *model, int numBins, double alpha) {
@@ -47,4 +54,35 @@ void trainNaiveBayes(NaiveBayesModel *model, MNISTDataset *dataset) {
             }
         }
     }
+    
+}
+
+// Function to predict the digit for a single image
+uint8_t predictNaiveBayes(NaiveBayesModel *model, uint8_t *image, uint32_t imageSize) {
+    double logProb[10] = {0};
+    
+    // Calculate log probability for each class
+    for (int c = 0; c < 10; c++) {
+        // Start with log of class prior
+        logProb[c] = log(model->classPrior[c]);
+        
+        // Add log probabilities of each pixel
+        for (uint32_t j = 0; j < imageSize; j++) {
+            int bin = getBin(image[j], model->binWidth);
+            logProb[c] += log(model->pixelProb[c][j][bin]);
+        }
+    }
+    
+    // Find the class with the highest log probability
+    uint8_t bestClass = 0;
+    double bestLogProb = logProb[0];
+    
+    for (int c = 1; c < 10; c++) {
+        if (logProb[c] > bestLogProb) {
+            bestLogProb = logProb[c];
+            bestClass = c;
+        }
+    }
+    
+    return bestClass;
 }

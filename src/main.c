@@ -1,3 +1,9 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include "mnist_loader.h"
+#include "naive_bayes.h"
+
 int main() {
     MNISTDataset trainDataset, testDataset;
     NaiveBayesModel model;

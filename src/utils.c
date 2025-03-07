@@ -1,3 +1,6 @@
+#include <stdint.h>
+#include "utils.h"
+
 // Function to convert from MSB first (big-endian) to host format
 uint32_t convert_endian(uint32_t value) {
     return ((value >> 24) & 0xff) | 

@@ -1,4 +1,10 @@
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include "mnist_loader.h"
+#include "utils.h"
+
 // Function to load an MNIST dataset
 int loadMNISTDataset(const char *imageFilename, const char *labelFilename, MNISTDataset *dataset) {
     FILE *imageFile, *labelFile;
@@ -104,4 +110,21 @@ void freeMNISTDataset(MNISTDataset *dataset) {
     free(dataset->labels);
     dataset->images = NULL;
     dataset->labels = NULL;
+}
+
+// Function to display an image as ASCII art
+void displayMNISTImage(uint8_t *image, uint32_t rows, uint32_t cols) {
+    for (uint32_t i = 0; i < rows; i++) {
+        for (uint32_t j = 0; j < cols; j++) {
+            // Convert pixel value to a character based on intensity
+            char c = ' ';
+            uint8_t pixel = image[i * cols + j];
+            if (pixel > 200) c = '#';
+            else if (pixel > 150) c = '+';
+            else if (pixel > 100) c = '-';
+            else if (pixel > 50) c = '.';
+            printf("%c", c);
+        }
+        printf("\n");
+    }
 }
