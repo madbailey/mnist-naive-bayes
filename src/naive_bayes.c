@@ -1,21 +1,59 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <math.h>
 #include "naive_bayes.h"
 #include "mnist_loader.h"
 
 //basic naive bayes implementation 
 
-void initNaiveBayes(NaiveBayesModel *model, int numBins, double alpha) {
+bool initNaiveBayes(NaiveBayesModel *model, int numBins, double alpha, uint32_t imageSize) {
     model->numBins = numBins;
     model->binWidth = 256 / numBins;
     model->alpha = alpha;
+    model->imageSize = imageSize;
 
-    //set probs to zero to start
-    memset(model->pixelProb, 0, sizeof(model->pixelProb));
+    model->pixelProb = malloc(10 * sizeof(double **));
+    if (!model->pixelProb)
+        return false;
+
+    for (uint32_t i = 0; i < 10; i++) {
+        model->pixelProb[i] = malloc(imageSize * sizeof(double *));
+        if (!model->pixelProb[i]) {
+            // Free previously allocated pointers to avoid memory leak
+            for (uint32_t j = 0; j < i; j++) {
+                free(model->pixelProb[j]);
+            }
+            free(model->pixelProb);
+            return false;
+        }
+        for (uint32_t j = 0; j < imageSize; j++) {
+            model->pixelProb[i][j] = calloc(numBins, sizeof(double));
+            if (!model->pixelProb[i][j]) {
+                // Free memory allocated for current row
+                for (uint32_t k = 0; k < j; k++) {
+                    free(model->pixelProb[i][k]);
+                }
+                free(model->pixelProb[i]);
+                // Free memory for previous rows
+                for (uint32_t k = 0; k < i; k++) {
+                    for (uint32_t l = 0; l < imageSize; l++) {
+                        free(model->pixelProb[k][l]);
+                    }
+                    free(model->pixelProb[k]);
+                }
+                free(model->pixelProb);
+                return false;
+            }
+        }
+    }
+
+    // Initialize class prior probabilities to zero
     memset(model->classPrior, 0, sizeof(model->classPrior));
+    return true;
 }
+
 //map pixel intensity to bin
 int getBin(int intensity, int binWidth) {
     return intensity /binWidth;
@@ -56,7 +94,16 @@ void trainNaiveBayes(NaiveBayesModel *model, MNISTDataset *dataset) {
     }
     
 }
-
+void freeNaiveBayes(NaiveBayesModel *model) {
+    for (uint32_t i = 0; i < 10; i++) {
+        for (uint32_t j = 0; j < model->imageSize; j++) {
+            free(model->pixelProb[i][j]);
+        }
+        free(model->pixelProb[i]);
+    }
+    free(model->pixelProb);
+    model->pixelProb = NULL;
+}
 // Function to predict the digit for a single image
 uint8_t predictNaiveBayes(NaiveBayesModel *model, uint8_t *image, uint32_t imageSize) {
     double logProb[10] = {0};

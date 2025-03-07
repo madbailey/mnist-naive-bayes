@@ -11,21 +11,29 @@ int main() {
     // Load training data
     printf("Loading training data...\n");
     if (!loadMNISTDataset("data/train-images-idx3-ubyte", "data/train-labels-idx1-ubyte", &trainDataset)) {
+        printf("Failed to load training data. Check that files exist in the data/ directory.\n");
         return 1;
     }
     printf("Loaded %u training images\n", trainDataset.numImages);
     
     // Load test data
     printf("Loading test data...\n");
-    if (!loadMNISTDataset("data/t10k-images-idx3-ubyte", "data/t10k-labels-idx1-ubyte", &testDataset)) {
+    if (!loadMNISTDataset("data/t10k-images.idx3-ubyte", "data/t10k-labels-idx1-ubyte", &testDataset)) {
+        printf("Failed to load test data. Check that files exist in the data/ directory.\n");
         freeMNISTDataset(&trainDataset);
         return 1;
     }
     printf("Loaded %u test images\n", testDataset.numImages);
     
     // Initialize and train the model
-    printf("Training Naive Bayes model...\n");
-    initNaiveBayes(&model, 32, 1.0);  // 32 bins, alpha=1.0
+    printf("Training model...\n");
+    if (!initNaiveBayes(&model, 32, 1.0, trainDataset.imageSize)) {
+        printf("Failed to initialize model\n");
+        freeMNISTDataset(&trainDataset);
+        freeMNISTDataset(&testDataset);
+        return 1;
+    }
+    
     trainNaiveBayes(&model, &trainDataset);
     
     // Test the model

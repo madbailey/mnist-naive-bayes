@@ -13,14 +13,14 @@ int loadMNISTDataset(const char *imageFilename, const char *labelFilename, MNIST
     // Open the image file
     imageFile = fopen(imageFilename, "rb");
     if (imageFile == NULL) {
-        perror("Error opening MNIST image file");
+        perror("Error opening image file");
         return 0;
     }
     
     // Open the label file
     labelFile = fopen(labelFilename, "rb");
     if (labelFile == NULL) {
-        perror("Error opening MNIST label file");
+        perror("Error opening label file");
         fclose(imageFile);
         return 0;
     }
@@ -46,7 +46,7 @@ int loadMNISTDataset(const char *imageFilename, const char *labelFilename, MNIST
     
     // Verify the magic numbers
     if (imageMagic != 2051 || labelMagic != 2049) {
-        printf("Invalid MNIST file format\n");
+        printf("Invalid file format\n");
         fclose(imageFile);
         fclose(labelFile);
         return 0;
