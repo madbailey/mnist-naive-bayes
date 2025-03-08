@@ -173,11 +173,26 @@ void transformEMNISTImage(uint8_t *image, uint32_t rows, uint32_t cols) {
         return;
     }
     
-    // Use the improved transformer with the desired rotation angle.
-    // Try 270 degrees if that gives the correct orientation.
-    transformEMNISTImageBetter(image, size, temp, 270);
+    // Rotate image 90 degrees clockwise
+    for (uint32_t r = 0; r < size; r++) {
+        for (uint32_t c = 0; c < size; c++) {
+            temp[c * size + (size - 1 - r)] = image[r * size + c];
+        }
+    }
     
+    // Copy the rotated result back to the original image
     memcpy(image, temp, size * size);
+    
+    // Now mirror the image horizontally
+    for (uint32_t r = 0; r < size; r++) {
+        for (uint32_t c = 0; c < size/2; c++) {
+            // Swap pixels across the vertical middle axis
+            uint8_t pixel = image[r * size + c];
+            image[r * size + c] = image[r * size + (size - 1 - c)];
+            image[r * size + (size - 1 - c)] = pixel;
+        }
+    }
+    
     free(temp);
 }
 // Function to display an image as ASCII art

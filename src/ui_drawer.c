@@ -813,20 +813,24 @@ int loadReferenceSamples(const char* imageFile, const char* labelFile) {
     MNISTDataset refDataset;
     int isEMNIST = (strstr(imageFile, "emnist") != NULL);
 
+    // Load the dataset with the appropriate function
     if (isEMNIST) {
+        printf("Loading EMNIST reference samples...\n");
         if (!loadEMNISTDataset(imageFile, labelFile, &refDataset)) {
             printf("Failed to load reference samples\n");
             return 0;
         }
     } else {
+        printf("Loading MNIST reference samples...\n");
         if (!loadMNISTDataset(imageFile, labelFile, &refDataset)) {
             printf("Failed to load reference samples\n");
             return 0;
         }
     }
 
-    // Adjust labels to be 0-based
+    // Adjust labels to be 0-based for EMNIST
     if (isEMNIST) {
+        printf("Adjusting reference sample labels to be 0-based...\n");
         for (uint32_t i = 0; i < refDataset.numImages; i++) {
             if (refDataset.labels[i] > 0) {
                 refDataset.labels[i] -= 1;  // Make 1-26 into 0-25
@@ -841,13 +845,14 @@ int loadReferenceSamples(const char* imageFile, const char* labelFile) {
 
     // Keep track of how many samples we've found for each class
     int sampleCounts[26] = {0};
+    int maxClassesToLoad = isEMNIST ? 26 : 10;
 
     // Go through the dataset and pick representative samples
     for (uint32_t i = 0; i < refDataset.numImages && i < 5000; i++) {  // Limit to first 5000 images for speed
         uint8_t label = refDataset.labels[i];
 
-        // Skip if not a letter (0-25)
-        if (label >= 26) continue;
+        // Skip if label is out of range for our application
+        if (label >= maxClassesToLoad) continue;
 
         // If we haven't filled this class yet
         if (sampleCounts[label] < gReferenceSamples.numSamplesPerClass) {
@@ -861,7 +866,7 @@ int loadReferenceSamples(const char* imageFile, const char* labelFile) {
 
         // Break if we've filled all classes
         int allFilled = 1;
-        for (int c = 0; c < 26; c++) {
+        for (int c = 0; c < maxClassesToLoad; c++) {
             if (sampleCounts[c] < gReferenceSamples.numSamplesPerClass) {
                 allFilled = 0;
                 break;
@@ -872,8 +877,12 @@ int loadReferenceSamples(const char* imageFile, const char* labelFile) {
 
     // Print how many samples we found
     printf("Reference samples loaded:\n");
-    for (int c = 0; c < 26; c++) {
-        printf("%c: %d, ", 'A' + c, sampleCounts[c]);
+    for (int c = 0; c < maxClassesToLoad; c++) {
+        if (isEMNIST) {
+            printf("%c: %d, ", 'A' + c, sampleCounts[c]);
+        } else {
+            printf("%d: %d, ", c, sampleCounts[c]);
+        }
         if ((c+1) % 6 == 0) printf("\n");
     }
     printf("\n");
