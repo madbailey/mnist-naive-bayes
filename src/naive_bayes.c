@@ -144,6 +144,7 @@ void trainNaiveBayes(NaiveBayesModel *model, HOGFeatures *hogFeatures) {
 }
 
 // Function to predict the digit for a single image
+// Function to predict the digit for a single image
 uint8_t predictNaiveBayes(NaiveBayesModel *model, double *features) {
     double maxLogProb = -INFINITY;
     int bestClass = 0;
@@ -153,8 +154,23 @@ uint8_t predictNaiveBayes(NaiveBayesModel *model, double *features) {
         double logProb = log(model->classPrior[c]);
         
         for (int f = 0; f < model->numFeatures; f++) {
-            int bin = getHOGBin(features[f], model->binWidth);
-            logProb += log(model->featureProb[c][f][bin]);
+            // Ensure feature value is in valid range
+            double featureVal = features[f];
+            featureVal = (featureVal < 0) ? 0 : (featureVal > 1.0 ? 1.0 : featureVal);
+            
+            // Determine which bin the orientation falls into
+            int bin = (int)(featureVal / model->binWidth);
+            
+            // Safety check for valid bin index
+            bin = (bin < 0) ? 0 : (bin >= model->numBins ? model->numBins - 1 : bin);
+            
+            // Add log probability from this feature
+            double prob = model->featureProb[c][f][bin];
+            
+            // Ensure probability is not zero (avoid log(0))
+            prob = (prob < 1e-10) ? 1e-10 : prob;
+            
+            logProb += log(prob);
         }
         
         if (logProb > maxLogProb) {

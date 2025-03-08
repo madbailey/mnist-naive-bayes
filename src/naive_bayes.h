@@ -8,7 +8,7 @@
 typedef struct {
     
     int numClasses;
-    int numFeatures;
+    uint32_t numFeatures;
     int numBins;
     double binWidth;
     double alpha;

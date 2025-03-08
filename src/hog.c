@@ -9,7 +9,7 @@ static void computeGradient(uint8_t *image, uint32_t rows, uint32_t cols,
     
     double dx, dy;
 
-    // Handle image boundaries with mirroring (fix signed/unsigned comparisons)
+    // Handle image boundaries with mirroring
     uint32_t left = (x > 0) ? (uint32_t)(x - 1) : 0;
     uint32_t right = (x < (int)(cols - 1)) ? (uint32_t)(x + 1) : cols - 1;
     uint32_t top = (y > 0) ? (uint32_t)(y - 1) : 0;
@@ -19,34 +19,50 @@ static void computeGradient(uint8_t *image, uint32_t rows, uint32_t cols,
     dx = (double)image[y * cols + right] - (double)image[y * cols + left];
     dy = (double)image[bottom * cols + x] - (double)image[top * cols + x];
 
-    // Calculate magnitude and orientation
+    // Calculate magnitude
     *magnitude = sqrt(dx * dx + dy * dy);
-    *orientation = atan2(dy, dx);
-
-    // Convert orientation to degrees in the range [0, 180)
-    *orientation = fmod((*orientation * 180.0 / M_PI) + 180.0, 180.0);
+    
+    // Handle the case when gradient is zero (avoid undefined orientation)
+    if (fabs(dx) < 1e-6 && fabs(dy) < 1e-6) {
+        *orientation = 0;
+    } else {
+        // Calculate orientation in the range [-pi, pi]
+        *orientation = atan2(dy, dx);
+        
+        // Convert orientation to degrees in the range [0, 180)
+        *orientation = fmod((*orientation * 180.0 / M_PI) + 180.0, 180.0);
+    }
 }
 
 void extractHOGFeatures(MNISTDataset *dataset, HOGFeatures *hogFeatures, int cellSize, int numBins) {
-    //calculat number of cells in each direction
-    int cellsX = dataset->cols /cellSize;
-    int cellsY  = dataset->rows /cellSize;
+    //calculate number of cells in each direction
+    int cellsX = dataset->cols / cellSize;
+    int cellsY = dataset->rows / cellSize;
 
-    //calculate the number of hohg features in the image
+    //calculate the number of hog features in the image
     hogFeatures->features = (double*)malloc(hogFeatures->numImages * hogFeatures->numFeatures * sizeof(double));
 
-    hogFeatures->labels = (uint8_t*)malloc(hogFeatures->numImages *sizeof(uint8_t));
+    // Only allocate and copy labels if we have them in the dataset
+    if (dataset->labels != NULL) {
+        hogFeatures->labels = (uint8_t*)malloc(hogFeatures->numImages * sizeof(uint8_t));
+        if (hogFeatures->labels == NULL) {
+            printf("failed to allocate memory for HOG labels\n");
+            free(hogFeatures->features);
+            hogFeatures->features = NULL;
+            return;
+        }
+        memcpy(hogFeatures->labels, dataset->labels, hogFeatures->numImages * sizeof(uint8_t));
+    } else {
+        hogFeatures->labels = NULL;  // Explicitly set to NULL if no labels
+    }
 
-    if (hogFeatures->features == NULL || hogFeatures->labels == NULL) {
+    if (hogFeatures->features == NULL) {
         printf("failed to allocate memory for HOG features\n");
-        free(hogFeatures->features);
-        free(hogFeatures->labels);
         return;
     }
 
-    memcpy(hogFeatures->labels, dataset->labels, hogFeatures->numImages * sizeof(uint8_t));
-
-    memset(hogFeatures->features, 0, hogFeatures->numImages * sizeof(uint8_t));
+    // Initialize all features to zero
+    memset(hogFeatures->features, 0, hogFeatures->numImages * hogFeatures->numFeatures * sizeof(double));
     
     // Process images
     for (uint32_t imgIdx = 0; imgIdx < dataset->numImages; imgIdx++) {
@@ -103,9 +119,14 @@ void extractHOGFeatures(MNISTDataset *dataset, HOGFeatures *hogFeatures, int cel
 
 void freeHOGFeatures(HOGFeatures *hogFeatures) {
     if (hogFeatures) {
-        free(hogFeatures->features);
-        free(hogFeatures->labels);
-        hogFeatures->features = NULL;
-        hogFeatures->labels = NULL;
+        if (hogFeatures->features) {
+            free(hogFeatures->features);
+            hogFeatures->features = NULL;
+        }
+        
+        if (hogFeatures->labels) {
+            free(hogFeatures->labels);
+            hogFeatures->labels = NULL;
+        }
     }
 }
