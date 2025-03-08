@@ -20,25 +20,61 @@ bool initNaiveBayes(NaiveBayesModel *model, int numClasses, int numFeatures, int
     model->alpha = alpha;
 
     model->classPrior = (double*)malloc(numClasses * sizeof(double));
+    if (model->classPrior == NULL) {
+        printf("Failed to allocate memory for class priors\n");
+        return false;
+    }
 
     // Allocate memory for feature probabilities
     model->featureProb = (double***)malloc(numClasses * sizeof(double**));
+    if (model->featureProb == NULL) {
+        free(model->classPrior);
+        printf("Failed to allocate memory for feature probabilities\n");
+        return false;
+    }
+
     for (int c = 0; c < numClasses; c++) {
         model->featureProb[c] = (double**)malloc(numFeatures * sizeof(double*));
+        if (model->featureProb[c] == NULL) {
+            // Clean up previously allocated memory
+            for (int i = 0; i < c; i++) {
+                free(model->featureProb[i]);
+            }
+            free(model->featureProb);
+            free(model->classPrior);
+            printf("Failed to allocate memory for feature probabilities\n");
+            return false;
+        }
+
         for (int f = 0; f < numFeatures; f++) {
             model->featureProb[c][f] = (double*)malloc(numBins * sizeof(double));
-            // Initialize probabilities to zero
+            if (model->featureProb[c][f] == NULL) {
+                // Clean up previously allocated memory
+                for (int j = 0; j < f; j++) {
+                    free(model->featureProb[c][j]);
+                }
+                for (int i = 0; i < c; i++) {
+                    for (int j = 0; j < numFeatures; j++) {
+                        free(model->featureProb[i][j]);
+                    }
+                    free(model->featureProb[i]);
+                }
+                free(model->featureProb);
+                free(model->classPrior);
+                printf("Failed to allocate memory for feature probabilities\n");
+                return false;
+            }
             memset(model->featureProb[c][f], 0, numBins * sizeof(double));
         }
     }
     
-    // Initialize class priors to zero
     memset(model->classPrior, 0, numClasses * sizeof(double));
     
     printf("Initialized HOG Naive Bayes model with %d classes, %d features, %d bins\n", 
            numClasses, numFeatures, numBins);
+    
+    return true;
 }
-
 void trainNaiveBayes(NaiveBayesModel *model, HOGFeatures *hogFeatures) {
     if (model->numFeatures != hogFeatures->numFeatures) {
         printf("Error: Feature count mismatch\n");

@@ -4,26 +4,26 @@
 #include <string.h>
 #include "hog.h"
 
-static void computeGradient(__uint8_t *image, __uint32_t rows, __uint32_t cols, 
+static void computeGradient(uint8_t *image, uint32_t rows, uint32_t cols, 
     int x, int y, double *magnitude, double *orientation) {
     
     double dx, dy;
 
+    // Handle image boundaries with mirroring (fix signed/unsigned comparisons)
+    uint32_t left = (x > 0) ? (uint32_t)(x - 1) : 0;
+    uint32_t right = (x < (int)(cols - 1)) ? (uint32_t)(x + 1) : cols - 1;
+    uint32_t top = (y > 0) ? (uint32_t)(y - 1) : 0;
+    uint32_t bottom = (y < (int)(rows - 1)) ? (uint32_t)(y + 1) : rows - 1;
 
-    int left = (x >0) ? x-1 : 0;
-    int right = (x < cols -1) ? x+ 1 : cols -1;
-    int top = (y > 0) ? y -1 : 0;
-    int bottom = (y < rows -1) ? y + 1 : rows -1;
-
-    //compute gradients using central differences
+    // Compute gradients using central differences
     dx = (double)image[y * cols + right] - (double)image[y * cols + left];
     dy = (double)image[bottom * cols + x] - (double)image[top * cols + x];
 
-    //calculate magintude and orientation
-    *magnitude = sqrt(dx * dx + dy *dy);
+    // Calculate magnitude and orientation
+    *magnitude = sqrt(dx * dx + dy * dy);
     *orientation = atan2(dy, dx);
 
-    //convert orientation to degrees
+    // Convert orientation to degrees in the range [0, 180)
     *orientation = fmod((*orientation * 180.0 / M_PI) + 180.0, 180.0);
 }
 
@@ -99,4 +99,13 @@ void extractHOGFeatures(MNISTDataset *dataset, HOGFeatures *hogFeatures, int cel
 
     printf("Extracted HOG features: %u images, %u features per image\n", 
         hogFeatures->numImages, hogFeatures->numFeatures);
+}
+
+void freeHOGFeatures(HOGFeatures *hogFeatures) {
+    if (hogFeatures) {
+        free(hogFeatures->features);
+        free(hogFeatures->labels);
+        hogFeatures->features = NULL;
+        hogFeatures->labels = NULL;
+    }
 }

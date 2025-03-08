@@ -11,7 +11,7 @@ int main() {
     HOGFeatures trainHOG, testHOG;
     NaiveBayesModel model;
     
-    int cellSize =4;
+    int cellSize = 4;
     int numBins = 9;
 
     // Load training data
@@ -31,7 +31,14 @@ int main() {
     }
     printf("Loaded %u test images\n", testDataset.numImages);
 
-    //extract the hog
+    // Initialize HOG feature structures
+    trainHOG.numImages = trainDataset.numImages;
+    trainHOG.numFeatures = (trainDataset.rows/cellSize) * (trainDataset.cols/cellSize) * numBins;
+    
+    testHOG.numImages = testDataset.numImages;
+    testHOG.numFeatures = (testDataset.rows/cellSize) * (testDataset.cols/cellSize) * numBins;
+
+    // Extract the HOG features
     printf("Extracting HOG features from training data...\n");
     extractHOGFeatures(&trainDataset, &trainHOG, cellSize, numBins);
 
@@ -40,9 +47,13 @@ int main() {
 
     // Initialize and train the model
     printf("Training model...\n");
-
-    initNaiveBayes(&model, 10, trainHOG.numFeatures, 32, 1.0);
-    trainNaiveBayes(&model, &trainDataset);
+    if (!initNaiveBayes(&model, 10, trainHOG.numFeatures, 32, 1.0)) {
+        printf("Failed to initialize Naive Bayes model\n");
+        return 1;
+    }
+    
+    // Fix: Use trainHOG instead of trainDataset
+    trainNaiveBayes(&model, &trainHOG);
     
     // Test the model
     printf("Testing the model...\n");
