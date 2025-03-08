@@ -6,130 +6,173 @@
 #include "naive_bayes.h"
 #include "mnist_loader.h"
 
-//basic naive bayes implementation 
+// naive bayes implementation with hog
+static int getHOGBin(double value, double binWidth) {
+    int bin = (int)(value/ binWidth);
+    return (bin >=0) ? (bin < 256 ? bin : 255) : 0;
+}
 
-bool initNaiveBayes(NaiveBayesModel *model, int numBins, double alpha, uint32_t imageSize) {
+bool initNaiveBayes(NaiveBayesModel *model, int numClasses, int numFeatures, int numBins, double alpha) {
+    model->numClasses = numClasses;
+    model->numFeatures = numFeatures;
     model->numBins = numBins;
-    model->binWidth = 256 / numBins;
+    model->binWidth = 1.0 / numBins;
     model->alpha = alpha;
-    model->imageSize = imageSize;
 
-    model->pixelProb = malloc(10 * sizeof(double **));
-    if (!model->pixelProb)
+    model->classPrior = (double*)malloc(numClasses * sizeof(double));
+    if (model->classPrior == NULL) {
+        printf("Failed to allocate memory for class priors\n");
         return false;
+    }
 
-    for (uint32_t i = 0; i < 10; i++) {
-        model->pixelProb[i] = malloc(imageSize * sizeof(double *));
-        if (!model->pixelProb[i]) {
-            // Free previously allocated pointers to avoid memory leak
-            for (uint32_t j = 0; j < i; j++) {
-                free(model->pixelProb[j]);
+    // Allocate memory for feature probabilities
+    model->featureProb = (double***)malloc(numClasses * sizeof(double**));
+    if (model->featureProb == NULL) {
+        free(model->classPrior);
+        printf("Failed to allocate memory for feature probabilities\n");
+        return false;
+    }
+
+    for (int c = 0; c < numClasses; c++) {
+        model->featureProb[c] = (double**)malloc(numFeatures * sizeof(double*));
+        if (model->featureProb[c] == NULL) {
+            // Clean up previously allocated memory
+            for (int i = 0; i < c; i++) {
+                free(model->featureProb[i]);
             }
-            free(model->pixelProb);
+            free(model->featureProb);
+            free(model->classPrior);
+            printf("Failed to allocate memory for feature probabilities\n");
             return false;
         }
-        for (uint32_t j = 0; j < imageSize; j++) {
-            model->pixelProb[i][j] = calloc(numBins, sizeof(double));
-            if (!model->pixelProb[i][j]) {
-                // Free memory allocated for current row
-                for (uint32_t k = 0; k < j; k++) {
-                    free(model->pixelProb[i][k]);
+
+        for (int f = 0; f < numFeatures; f++) {
+            model->featureProb[c][f] = (double*)malloc(numBins * sizeof(double));
+            if (model->featureProb[c][f] == NULL) {
+                // Clean up previously allocated memory
+                for (int j = 0; j < f; j++) {
+                    free(model->featureProb[c][j]);
                 }
-                free(model->pixelProb[i]);
-                // Free memory for previous rows
-                for (uint32_t k = 0; k < i; k++) {
-                    for (uint32_t l = 0; l < imageSize; l++) {
-                        free(model->pixelProb[k][l]);
+                for (int i = 0; i < c; i++) {
+                    for (int j = 0; j < numFeatures; j++) {
+                        free(model->featureProb[i][j]);
                     }
-                    free(model->pixelProb[k]);
+                    free(model->featureProb[i]);
                 }
-                free(model->pixelProb);
+                free(model->featureProb);
+                free(model->classPrior);
+                printf("Failed to allocate memory for feature probabilities\n");
                 return false;
             }
+            memset(model->featureProb[c][f], 0, numBins * sizeof(double));
         }
     }
-
-    // Initialize class prior probabilities to zero
-    memset(model->classPrior, 0, sizeof(model->classPrior));
+    
+    memset(model->classPrior, 0, numClasses * sizeof(double));
+    
+    printf("Initialized HOG Naive Bayes model with %d classes, %d features, %d bins\n", 
+           numClasses, numFeatures, numBins);
+    
     return true;
 }
+void trainNaiveBayes(NaiveBayesModel *model, HOGFeatures *hogFeatures) {
+    if (model->numFeatures != hogFeatures->numFeatures) {
+        printf("Error: Feature count mismatch\n");
+        return;
+    }
 
-//map pixel intensity to bin
-int getBin(int intensity, int binWidth) {
-    return intensity /binWidth;
-}
+    int ***counts;
+    int *classCounts;
 
-void trainNaiveBayes(NaiveBayesModel *model, MNISTDataset *dataset) {
-    int counts[10][784][256] = {0};
-    int classCounts[10] = {0};
-    
-    // Go through all training images
-    for (uint32_t i = 0; i < dataset->numImages; i++) {
-        uint8_t label = dataset->labels[i];
-        classCounts[label]++;
-        
-        // Count pixel intensities
-        for (uint32_t j = 0; j < dataset->imageSize; j++) {
-            uint8_t pixel = dataset->images[i * dataset->imageSize + j];
-            int bin = getBin(pixel, model->binWidth);
-            counts[label][j][bin]++;
+    // Allocate memory for counts
+    counts = (int***)malloc(model->numClasses * sizeof(int**));
+    for (int c = 0; c < model->numClasses; c++) {
+        counts[c] = (int**)malloc(model->numFeatures * sizeof(int*));
+        for (int f = 0; f < model->numFeatures; f++) {
+            counts[c][f] = (int*)malloc(model->numBins * sizeof(int));
+            memset(counts[c][f], 0, model->numBins * sizeof(int));
         }
     }
-    
-    // Calculate class priors
-    for (int c = 0; c < 10; c++) {
-        model->classPrior[c] = (double)classCounts[c] / dataset->numImages;
+
+    classCounts = (int*)malloc(model->numClasses * sizeof(int));
+    memset(classCounts, 0, model->numClasses * sizeof(int));
+
+    // Count feature occurrences
+    for (uint32_t i = 0; i < hogFeatures->numImages; i++) {
+        uint8_t label = hogFeatures->labels[i];
+        if (label >= model->numClasses) {
+            printf("Warning: Label %d out of range\n", label);
+            continue;
+        }
+        
+        classCounts[label]++;
+        
+        double *features = &hogFeatures->features[i * hogFeatures->numFeatures];
+        for (int f = 0; f < model->numFeatures; f++) {
+            int bin = getHOGBin(features[f], model->binWidth);
+            counts[label][f][bin]++;
+        }
     }
-    
-    // Calculate pixel probabilities with Laplace smoothing
-    for (int c = 0; c < 10; c++) {
-        for (uint32_t j = 0; j < dataset->imageSize; j++) {
+
+    // Calculate class priors
+    for (int c = 0; c < model->numClasses; c++) {
+        model->classPrior[c] = (double)classCounts[c] / hogFeatures->numImages;
+    }
+
+    // Calculate feature probabilities with Laplace smoothing
+    for (int c = 0; c < model->numClasses; c++) {
+        for (int f = 0; f < model->numFeatures; f++) {
             for (int b = 0; b < model->numBins; b++) {
-                // Apply Laplace smoothing
-                model->pixelProb[c][j][b] = 
-                    (counts[c][j][b] + model->alpha) / 
+                model->featureProb[c][f][b] = 
+                    (counts[c][f][b] + model->alpha) / 
                     (classCounts[c] + model->alpha * model->numBins);
             }
         }
     }
-    
-}
-void freeNaiveBayes(NaiveBayesModel *model) {
-    for (uint32_t i = 0; i < 10; i++) {
-        for (uint32_t j = 0; j < model->imageSize; j++) {
-            free(model->pixelProb[i][j]);
+
+    // Free temporary memory
+    for (int c = 0; c < model->numClasses; c++) {
+        for (int f = 0; f < model->numFeatures; f++) {
+            free(counts[c][f]);
         }
-        free(model->pixelProb[i]);
+        free(counts[c]);
     }
-    free(model->pixelProb);
-    model->pixelProb = NULL;
+    free(counts);
+    free(classCounts);
+
+    printf("Trained HOG Naive Bayes model\n");
 }
+
 // Function to predict the digit for a single image
-uint8_t predictNaiveBayes(NaiveBayesModel *model, uint8_t *image, uint32_t imageSize) {
-    double logProb[10] = {0};
+uint8_t predictNaiveBayes(NaiveBayesModel *model, double *features) {
+    double maxLogProb = -INFINITY;
+    int bestClass = 0;
     
     // Calculate log probability for each class
-    for (int c = 0; c < 10; c++) {
-        // Start with log of class prior
-        logProb[c] = log(model->classPrior[c]);
+    for (int c = 0; c < model->numClasses; c++) {
+        double logProb = log(model->classPrior[c]);
         
-        // Add log probabilities of each pixel
-        for (uint32_t j = 0; j < imageSize; j++) {
-            int bin = getBin(image[j], model->binWidth);
-            logProb[c] += log(model->pixelProb[c][j][bin]);
+        for (int f = 0; f < model->numFeatures; f++) {
+            int bin = getHOGBin(features[f], model->binWidth);
+            logProb += log(model->featureProb[c][f][bin]);
         }
-    }
-    
-    // Find the class with the highest log probability
-    uint8_t bestClass = 0;
-    double bestLogProb = logProb[0];
-    
-    for (int c = 1; c < 10; c++) {
-        if (logProb[c] > bestLogProb) {
-            bestLogProb = logProb[c];
+        
+        if (logProb > maxLogProb) {
+            maxLogProb = logProb;
             bestClass = c;
         }
     }
     
-    return bestClass;
+    return (uint8_t)bestClass;
+}
+
+void freeNaiveBayes(NaiveBayesModel *model) {
+    for (int c = 0; c < model->numClasses; c++) {
+        for (int f = 0; f < model->numFeatures; f++) {
+            free(model->featureProb[c][f]);
+        }
+        free(model->featureProb[c]);
+    }
+    free(model->featureProb);
+    free(model->classPrior);
 }
