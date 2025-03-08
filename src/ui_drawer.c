@@ -55,7 +55,6 @@ char getLabelChar(int label, int showingLetters) {
         return '0' + label;
     }
 }
-
 // Initialize the drawing UI
 int initUI(DrawingUI *ui, NaiveBayesModel *model, int numClasses, int showLetters) {
     // Initialize SDL
@@ -310,6 +309,11 @@ int processEvents(DrawingUI *ui) {
             if (isInsideButton(x, y, 170, 350, 140, 40)) {
                 ui->showProcessed = !ui->showProcessed;
             }
+            // Check if click is on "Viz Mode" button
+            if (isInsideButton(x, y, 330, 350, 150, 40)) {
+                cycleVisualizationMode(ui);
+                printf("Visualization mode changed to: %d\n", ui->vizMode);
+            }
         }
         else if (e.type == SDL_MOUSEBUTTONUP) {
             ui->drawing = 0;
@@ -517,6 +521,80 @@ void renderUI(DrawingUI *ui) {
             }
         }
     }
+    // Draw visualization mode selection button
+    drawButton(ui->renderer, 330, 350, 150, 40, 
+        "Viz Mode", LIGHT_GRAY);
+
+    // Display current visualization mode
+    char vizModeText[64];
+    switch (ui->vizMode) {
+    case VIZ_MODE_NONE:
+    sprintf(vizModeText, "Mode: None");
+    break;
+    case VIZ_MODE_PROCESSED:
+    sprintf(vizModeText, "Mode: Processed");
+    break;
+    case VIZ_MODE_REFERENCE:
+    sprintf(vizModeText, "Mode: Reference");
+    break;
+    case VIZ_MODE_HOG:
+    sprintf(vizModeText, "Mode: HOG Features");
+    break;
+    }
+    renderText(ui->renderer, 330, 400, vizModeText, BLACK);
+
+    // If we have a prediction, show the appropriate visualization based on mode
+    if (ui->prediction >= 0) {
+    switch (ui->vizMode) {
+    case VIZ_MODE_NONE:
+        // No visualization
+        break;
+        
+    case VIZ_MODE_PROCESSED:
+        // Processed view is already handled by the showProcessed flag
+        ui->showProcessed = 1;
+        break;
+        
+    case VIZ_MODE_REFERENCE:
+        // Show reference samples for the predicted letter
+        if (gReferenceSamples.loaded) {
+            renderReferenceSamples(ui->renderer, 
+                                    350, 450, 
+                                    300, 100, 
+                                    ui->prediction);
+        } else {
+            renderText(ui->renderer, 350, 450, 
+                        "Reference samples not available", RED);
+        }
+        break;
+        
+    case VIZ_MODE_HOG:
+        // Calculate and show HOG feature visualization
+        if (ui->lastFeatures == NULL) {
+            // Allocate space for features if not already done
+            ui->lastFeatures = (double*)malloc(ui->model->numFeatures * sizeof(double));
+            if (ui->lastFeatures == NULL) {
+                renderText(ui->renderer, 350, 450, 
+                            "Failed to allocate memory for feature viz", RED);
+                break;
+            }
+            
+            // We'll store features during processPrediction()
+            ui->lastFeaturesCount = ui->model->numFeatures;
+        }
+        
+        // Visualize the HOG features
+        if (ui->lastFeatures != NULL && gHOGViz.hasData) {
+            renderHOGVisualization(ui->renderer, 350, 450, 200);
+        } else {
+            renderText(ui->renderer, 350, 450, 
+                        "HOG visualization not available", RED);
+            renderText(ui->renderer, 350, 480, 
+                        "Draw a new letter to generate", BLACK);
+        }
+        break;
+    }
+    }
 
     // Update the screen
     SDL_RenderPresent(ui->renderer);
@@ -595,69 +673,140 @@ void preprocessCanvas(uint8_t *canvas, uint8_t *processedCanvas) {
         processedCanvas[i] = (processedCanvas[i] > 30) ? 255 : 0;
     }
 }
-// Calculate feature importance and map back to pixels
+// Replace the entire visualizeHOGFeatures() function with this improved version
 void visualizeHOGFeatures(DrawingUI *ui, double *features, uint8_t predictedClass) {
     // Clear the visualization
     memset(&gHOGViz.featureMap, 0, sizeof(gHOGViz.featureMap));
-    gHOGViz.hasData = 1;
-
-    // Get cell size from model
-    int cellSize = CELL_SIZE;
+    gHOGViz.hasData = 0;  // Set to 0 initially, will set to 1 when successful
+    
+    // Early return if invalid inputs
+    if (features == NULL || ui->model == NULL) {
+        printf("Invalid inputs for HOG visualization\n");
+        return;
+    }
+    
+    // Get parameters
+    int cellSize = CELL_SIZE;  // IMPORTANT: Must match training
     int numBins = NUM_BINS;
     int cellsX = 28 / cellSize;
-    //int cellsY = 28 / cellSize; // UNUSED VARIABLE
-
-    // For each feature, calculate its contribution to the decision
+    int cellsY = 28 / cellSize;
+    
+    // Create an array to store importance of each feature
+    double *featureImportance = (double*)malloc(ui->model->numFeatures * sizeof(double));
+    if (featureImportance == NULL) {
+        printf("Failed to allocate memory for feature importance\n");
+        return;
+    }
+    
+    // Calculate feature importance for the predicted class
     for (int f = 0; f < ui->model->numFeatures; f++) {
         double featureVal = features[f];
-
+        
         // Ensure feature value is in valid range
         featureVal = (featureVal < 0) ? 0 : (featureVal > 1.0 ? 1.0 : featureVal);
-
-        // Calculate bin index
+        
+        // Determine which bin the orientation falls into
         int bin = (int)(featureVal / ui->model->binWidth);
         bin = (bin < 0) ? 0 : (bin >= ui->model->numBins ? ui->model->numBins - 1 : bin);
-
-        // Calculate importance of this feature for the predicted class
-        double importance = log(ui->model->featureProb[predictedClass][f][bin] + 1e-10);
-
-        // Map this feature back to image coordinates
+        
+        // Calculate importance based on likelihood ratio
+        double importance = 0;
+        
+        // Compare this feature's probability for the predicted class vs. average of other classes
+        double probForClass = ui->model->featureProb[predictedClass][f][bin];
+        double avgProbOtherClasses = 0;
+        int numOtherClasses = 0;
+        
+        for (int c = 0; c < ui->model->numClasses; c++) {
+            if (c != predictedClass) {
+                avgProbOtherClasses += ui->model->featureProb[c][f][bin];
+                numOtherClasses++;
+            }
+        }
+        
+        // Calculate average probability for other classes
+        if (numOtherClasses > 0) {
+            avgProbOtherClasses /= numOtherClasses;
+        }
+        
+        // Calculate importance as a ratio (avoid division by zero)
+        if (avgProbOtherClasses > 1e-10) {
+            importance = probForClass / avgProbOtherClasses;
+        } else {
+            importance = probForClass > 1e-10 ? 10.0 : 1.0;  // Arbitrary high value if unique to this class
+        }
+        
+        // Take log to handle wide range of values
+        importance = log(importance + 1.0);  // +1 to avoid negative values for ratios < 1
+        
+        // Store importance
+        featureImportance[f] = importance;
+    }
+    
+    // Map feature importance back to image pixels
+    for (int f = 0; f < ui->model->numFeatures; f++) {
+        // Calculate which cell this feature belongs to
+        int binIndex = f % numBins;
         int cellIndex = f / numBins;
         int cellY = cellIndex / cellsX;
         int cellX = cellIndex % cellsX;
-
-        // For each pixel in this cell, add the importance
+        
+        // Skip if cell coordinates are invalid
+        if (cellY >= cellsY || cellX >= cellsX) {
+            continue;
+        }
+        
+        // For each pixel in this cell, add the feature importance
         for (int y = 0; y < cellSize; y++) {
             for (int x = 0; x < cellSize; x++) {
                 int pixelY = cellY * cellSize + y;
                 int pixelX = cellX * cellSize + x;
-
+                
                 if (pixelY < 28 && pixelX < 28) {
-                    gHOGViz.featureMap[pixelY][pixelX] += importance;
+                    // Scale by bin index to visualize orientation
+                    // This will make different orientations appear with different intensities
+                    double scaledImportance = featureImportance[f] * (1.0 + 0.2 * binIndex);
+                    gHOGViz.featureMap[pixelY][pixelX] += scaledImportance;
                 }
             }
         }
     }
-
-    // Normalize the importance values to [0, 1]
-    double minVal = gHOGViz.featureMap[0][0];
-    double maxVal = gHOGViz.featureMap[0][0];
-
+    
+    // Normalize the feature map to [0, 1] range
+    double minVal = 0;
+    double maxVal = 0;
+    int hasNonZeroValues = 0;
+    
+    // Find min and max values
     for (int y = 0; y < 28; y++) {
         for (int x = 0; x < 28; x++) {
-            if (gHOGViz.featureMap[y][x] < minVal) minVal = gHOGViz.featureMap[y][x];
-            if (gHOGViz.featureMap[y][x] > maxVal) maxVal = gHOGViz.featureMap[y][x];
-        }
-    }
-
-    double range = maxVal - minVal;
-    if (range > 0) {
-        for (int y = 0; y < 28; y++) {
-            for (int x = 0; x < 28; x++) {
-                gHOGViz.featureMap[y][x] = (gHOGViz.featureMap[y][x] - minVal) / range;
+            if (!hasNonZeroValues || gHOGViz.featureMap[y][x] != 0) {
+                if (!hasNonZeroValues) {
+                    minVal = maxVal = gHOGViz.featureMap[y][x];
+                    hasNonZeroValues = 1;
+                } else {
+                    if (gHOGViz.featureMap[y][x] < minVal) minVal = gHOGViz.featureMap[y][x];
+                    if (gHOGViz.featureMap[y][x] > maxVal) maxVal = gHOGViz.featureMap[y][x];
+                }
             }
         }
     }
+    
+    // Normalize if we have a valid range
+    if (hasNonZeroValues && maxVal > minVal) {
+        for (int y = 0; y < 28; y++) {
+            for (int x = 0; x < 28; x++) {
+                // Normalize to [0, 1]
+                gHOGViz.featureMap[y][x] = (gHOGViz.featureMap[y][x] - minVal) / (maxVal - minVal);
+            }
+        }
+        gHOGViz.hasData = 1;  // Mark as successful
+    }
+    
+    // Free temporary memory
+    free(featureImportance);
+    
+    printf("HOG feature visualization created (min=%f, max=%f)\n", minVal, maxVal);
 }
 // Load reference samples from the training dataset
 int loadReferenceSamples(const char* imageFile, const char* labelFile) {
@@ -725,48 +874,76 @@ int loadReferenceSamples(const char* imageFile, const char* labelFile) {
 
     return 1;
 }
-// Render HOG feature visualization as a heatmap overlay
+// Replace the renderHOGVisualization() function with this version
 void renderHOGVisualization(SDL_Renderer *renderer, int x, int y, int size) {
     if (!gHOGViz.hasData) {
+        // Draw placeholder if we don't have data
+        SDL_Rect rect = {x, y, size, size};
+        SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
+        SDL_RenderFillRect(renderer, &rect);
+        renderText(renderer, x + 20, y + size/2 - 10, "No HOG data", BLACK);
         return;
     }
     
     // Draw title
-    renderText(renderer, x, y - 20, "Feature Importance", (SDL_Color){0, 0, 0, 255});
+    renderText(renderer, x, y - 30, "HOG Feature Importance", BLACK);
+    renderText(renderer, x, y - 10, "Red = Strong Feature for This Class", BLACK);
     
     // Draw background
     SDL_Rect bgRect = {x, y, size, size};
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderFillRect(renderer, &bgRect);
     
-    // Draw border
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderDrawRect(renderer, &bgRect);
-    
-    // Draw heatmap
-    for (int sy = 0; sy < 28; sy++) {
-        for (int sx = 0; sx < 28; sx++) {
-            double val = gHOGViz.featureMap[sy][sx];
+    // Draw the HOG heatmap
+    for (int py = 0; py < 28; py++) {
+        for (int px = 0; px < 28; px++) {
+            double val = gHOGViz.featureMap[py][px];
             
-            // Skip very low values for clarity
-            if (val < 0.2) continue;
+            // Only draw significant values
+            if (val < 0.05) continue;
             
-            // Calculate a color based on importance (blue->green->red)
-            int r = (int)(val * 255);
-            int g = (int)((1.0 - val) * 255);
-            int b = 0;
+            // Scale pixel coordinates to display size
+            int dispX = x + px * size / 28;
+            int dispY = y + py * size / 28;
+            int pixSize = size / 28 + 1;  // +1 to avoid gaps
             
-            SDL_Rect pixelRect = {
-                x + sx * size / 28,
-                y + sy * size / 28,
-                size / 28 + 1,
-                size / 28 + 1
-            };
+            // Create a color based on importance
+            // Red = high importance, Blue = low importance
+            uint8_t r = (uint8_t)(val * 255);
+            uint8_t g = 0;
+            uint8_t b = (uint8_t)((1.0 - val) * 255);
+            uint8_t a = (uint8_t)(val * 200 + 55);  // More important = more opaque
             
-            SDL_SetRenderDrawColor(renderer, r, g, b, 200); // Semi-transparent
-            SDL_RenderFillRect(renderer, &pixelRect);
+            // Draw the pixel
+            SDL_Rect pixRect = {dispX, dispY, pixSize, pixSize};
+            SDL_SetRenderDrawColor(renderer, r, g, b, a);
+            SDL_RenderFillRect(renderer, &pixRect);
         }
     }
+    
+    // Draw original image overlay (faint)
+    for (int py = 0; py < 28; py++) {
+        for (int px = 0; px < 28; px++) {
+            if (gHOGViz.hasData && py < 28 && px < 28) {
+                int dispX = x + px * size / 28;
+                int dispY = y + py * size / 28;
+                int pixSize = size / 28 + 1;
+                
+                // Only draw if the pixel is set in the original image
+                if (gHOGViz.hasData && 
+                    gHOGViz.featureMap[py][px] < 0.05) { // Low importance original pixels
+                    
+                    SDL_Rect pixRect = {dispX, dispY, pixSize, pixSize};
+                    SDL_SetRenderDrawColor(renderer, 100, 100, 100, 40);  // Very faint gray
+                    SDL_RenderFillRect(renderer, &pixRect);
+                }
+            }
+        }
+    }
+    
+    // Draw border around the visualization
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderDrawRect(renderer, &bgRect);
 }
 // Display reference samples for comparison
 void renderReferenceSamples(SDL_Renderer *renderer, int x, int y, int width, int height, int letterIndex) {
@@ -939,7 +1116,41 @@ void processPrediction(DrawingUI *ui) {
           ui->showingLetters ? 'A' + ui->prediction : '0' + ui->prediction,
           ui->confidence[ui->prediction] * 100.0);
     
+    // Store the extracted features for visualization if in HOG mode
+    if (ui->vizMode == VIZ_MODE_HOG) {
+        // Allocate/reallocate memory for features if needed
+        if (ui->lastFeatures == NULL || ui->lastFeaturesCount != hogFeatures.numFeatures) {
+            // Free old memory if it exists
+            if (ui->lastFeatures != NULL) {
+                free(ui->lastFeatures);
+            }
+            
+            // Allocate new memory
+            ui->lastFeatures = (double*)malloc(hogFeatures.numFeatures * sizeof(double));
+            if (ui->lastFeatures != NULL) {
+                ui->lastFeaturesCount = hogFeatures.numFeatures;
+            } else {
+                ui->lastFeaturesCount = 0;
+                printf("Failed to allocate memory for feature storage\n");
+            }
+        }
+        
+        // Copy features if memory allocation succeeded
+        if (ui->lastFeatures != NULL) {
+            memcpy(ui->lastFeatures, hogFeatures.features, 
+                hogFeatures.numFeatures * sizeof(double));
+                
+            // Generate the HOG visualization
+            visualizeHOGFeatures(ui, hogFeatures.features, bestClass);
+        }
+    }
+
+
+    
     // Free allocated memory in reverse order of allocation
     free(logProbs);
     free(hogFeatures.features);
+    // Add this right at the end of processPrediction() before returning
+    // This makes sure we keep the processed view visible for better user feedback
+    ui->showProcessed = 1;
 }

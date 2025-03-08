@@ -78,7 +78,7 @@ int main(int argc, char *argv[]) {
 
     // Initialize and train the model
     printf("Training model (this might take a minute)...\n");
-    if (!initNaiveBayes(&model, numClasses, trainHOG.numFeatures, 32, 1.0)) {
+    if (!initNaiveBayes(&model, numClasses, trainHOG.numFeatures, numBins, 1.0)) {
         printf("Failed to initialize Naive Bayes model\n");
         return 1;
     }
