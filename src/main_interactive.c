@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     HOGFeatures trainHOG;
     NaiveBayesModel model;
     
-    int cellSize = 4;
+    int cellSize = 5;
     int numBins = 9;
     int numClasses = recognizeLetters ? 26 : 10;  // 26 for letters, 10 for digits
     

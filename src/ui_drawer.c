@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include "ui_drawer.h"
@@ -382,10 +383,8 @@ void clearCanvas(DrawingUI *ui) {
 }
 
 // Process the current drawing and make a prediction
+// Process the current drawing and make a prediction
 void processPrediction(DrawingUI *ui) {
-    // canvas data is already in the format we need (28x28 grayscale)
-    // Now extract HOG features
-    
     // Create a temporary dataset to extract HOG features
     MNISTDataset tempDataset;
     tempDataset.numImages = 1;
@@ -395,10 +394,12 @@ void processPrediction(DrawingUI *ui) {
     tempDataset.images = ui->canvas;
     tempDataset.labels = NULL;  // Not needed for prediction
     
-    // Create HOG features structure
+    // Create HOG features structure and initialize all fields to avoid undefined behavior
     HOGFeatures hogFeatures;
     hogFeatures.numImages = 1;
     hogFeatures.numFeatures = ui->model->numFeatures;
+    hogFeatures.labels = NULL;  // Not needed for prediction
+    hogFeatures.features = NULL; // Initialize to NULL
     
     // Allocate memory for features
     hogFeatures.features = (double*)malloc(hogFeatures.numFeatures * sizeof(double));
@@ -407,6 +408,9 @@ void processPrediction(DrawingUI *ui) {
         return;
     }
     
+    // Initialize features memory to zeros
+    memset(hogFeatures.features, 0, hogFeatures.numFeatures * sizeof(double));
+    
     // Extract HOG features
     int cellSize = 4;  // Same as used in training
     int numBins = 9;   // Same as used in training
@@ -414,46 +418,68 @@ void processPrediction(DrawingUI *ui) {
     
     // Make prediction using our model
     double *features = hogFeatures.features;
-    uint8_t prediction = predictNaiveBayes(ui->model, features);
     
-    // Store prediction
-    ui->prediction = prediction;
+    // Store all log probabilities
+    double *logProbs = (double*)malloc(ui->numClasses * sizeof(double));
+    if (logProbs == NULL) {
+        printf("Failed to allocate memory for log probabilities\n");
+        free(hogFeatures.features);
+        return;
+    }
     
-    // Now compute confidence scores for all classes
-    // (this is a simplified approach - we use log probabilities directly)
-    double totalProb = 0.0;
+    // Initialize to very negative values
+    for (int c = 0; c < ui->numClasses; c++) {
+        logProbs[c] = -1000.0;
+    }
     
-    // Get raw log probabilities for all classes
-    double logProbs[26] = {0.0};
-    double maxLogProb = -INFINITY;
+    // Initialize for tracking
+    double maxLogProb = -1000.0;
+    int bestClass = 0;
     
+    // Calculate log probabilities directly without using predictNaiveBayes
     for (int c = 0; c < ui->numClasses; c++) {
         double logProb = log(ui->model->classPrior[c]);
         
         for (int f = 0; f < ui->model->numFeatures; f++) {
             int bin = (int)(features[f] / ui->model->binWidth);
-            if (bin >= 0 && bin < ui->model->numBins) {
-                logProb += log(ui->model->featureProb[c][f][bin]);
-            }
+            // Make sure bin is in valid range
+            bin = (bin < 0) ? 0 : (bin >= ui->model->numBins ? ui->model->numBins - 1 : bin);
+            
+            // Add log probability, ensuring it's not a very small value to avoid -inf
+            double prob = ui->model->featureProb[c][f][bin];
+            if (prob < 1e-10) prob = 1e-10;
+            
+            logProb += log(prob);
         }
         
         logProbs[c] = logProb;
         if (logProb > maxLogProb) {
             maxLogProb = logProb;
+            bestClass = c;
         }
     }
     
+    // Set prediction
+    ui->prediction = bestClass;
+    
+    // Apply a temperature parameter to soften the confidence scores
+    double temperature = 1.5;  // Higher values = softer distribution
+    double totalProb = 0.0;
+    
     // Convert log probabilities to actual probabilities using softmax
     for (int c = 0; c < ui->numClasses; c++) {
-        ui->confidence[c] = exp(logProbs[c] - maxLogProb);
+        ui->confidence[c] = exp((logProbs[c] - maxLogProb) / temperature);
         totalProb += ui->confidence[c];
     }
     
     // Normalize to get confidence scores
-    for (int c = 0; c < ui->numClasses; c++) {
-        ui->confidence[c] /= totalProb;
+    if (totalProb > 0) {
+        for (int c = 0; c < ui->numClasses; c++) {
+            ui->confidence[c] /= totalProb;
+        }
     }
     
-    // Free HOG features
+    // Free allocated memory in reverse order of allocation
+    free(logProbs);
     free(hogFeatures.features);
 }
