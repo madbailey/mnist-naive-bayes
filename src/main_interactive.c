@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include "mnist_loader.h"
 #include "hog.h"
@@ -37,7 +38,8 @@ int main(int argc, char *argv[]) {
     HOGFeatures trainHOG;
     NaiveBayesModel model;
     
-    int cellSize = 5;
+    // IMPORTANT: These parameters must match those in ui_drawer.c
+    int cellSize = 4;  // MAKE SURE THIS MATCHES THE CELL_SIZE IN ui_drawer.c
     int numBins = 9;
     int numClasses = recognizeLetters ? 26 : 10;  // 26 for letters, 10 for digits
     
@@ -83,6 +85,12 @@ int main(int argc, char *argv[]) {
     
     trainNaiveBayes(&model, &trainHOG);
     printf("Model trained and ready!\n");
+    
+    // Load reference samples for visualization
+    printf("Loading reference samples for visualization...\n");
+    if (!loadReferenceSamples(imageFile, labelFile)) {
+        printf("Warning: Failed to load reference samples. Visualization will be limited.\n");
+    }
     
     // Initialize drawing UI
     DrawingUI ui;
