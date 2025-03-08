@@ -33,8 +33,11 @@ typedef struct {
 // Structure to hold HOG visualization data
 typedef struct {
     double featureMap[28][28];     // Mapped importance of each pixel
+    double cellStrengths[7][7][9]; // Strength of each orientation in each cell [cellY][cellX][bin]
+    uint8_t originalImage[28*28];  // Copy of the original processed image
     int hasData;                   // Flag indicating if visualization data is available
 } HOGVisualization;
+
 
 // Structure to hold reference samples
 typedef struct {

@@ -253,7 +253,6 @@ int shouldPredict(void) {
     Uint32 currentTime = SDL_GetTicks();
     return (currentTime - lastDrawTime > PREDICTION_DELAY);
 }
-
 // Process mouse and keyboard events
 int processEvents(DrawingUI *ui) {
     SDL_Event e;
@@ -639,26 +638,39 @@ void preprocessCanvas(uint8_t *canvas, uint8_t *processedCanvas) {
     // Step 3: Calculate dimensions and center offset
     int width = maxX - minX + 1;
     int height = maxY - minY + 1;
-    int size = (width > height) ? width : height;
-
-    // Add padding (20% of size)
-    int padding = size / 5;
-    size += padding * 2;
-
-    // Ensure size doesn't exceed canvas dimensions
-    if (size > 28) size = 28;
-
+    
+    // Use a more conservative padding (10% instead of 20%)
+    int paddingX = width / 10;
+    int paddingY = height / 10;
+    
+    // Calculate new dimensions with padding
+    int newWidth = width + 2 * paddingX;
+    int newHeight = height + 2 * paddingY;
+    
+    // Determine scaling factor to fit in 28x28 while preserving aspect ratio
+    float scaleX = 28.0f / newWidth;
+    float scaleY = 28.0f / newHeight;
+    float scale = (scaleX < scaleY) ? scaleX : scaleY;
+    
+    // Calculate the final dimensions after scaling
+    int finalWidth = (int)(width * scale);
+    int finalHeight = (int)(height * scale);
+    
     // Calculate centering offsets
-    int offsetX = (28 - size) / 2;
-    int offsetY = (28 - size) / 2;
+    int offsetX = (28 - finalWidth) / 2;
+    int offsetY = (28 - finalHeight) / 2;
+    
+    // Ensure offsets are not negative
+    offsetX = (offsetX < 0) ? 0 : offsetX;
+    offsetY = (offsetY < 0) ? 0 : offsetY;
 
-    // Step 4: Scale and center the content
-    for (int y = 0; y < size; y++) {
-        for (int x = 0; x < size; x++) {
+    // Step 4: Scale and center the content with proper aspect ratio
+    for (int y = 0; y < finalHeight; y++) {
+        for (int x = 0; x < finalWidth; x++) {
             // Map the destination (x,y) back to source coordinates
-            int srcX = minX + (x * width) / size;
-            int srcY = minY + (y * height) / size;
-
+            int srcX = minX + (int)(x / scale);
+            int srcY = minY + (int)(y / scale);
+            
             // Ensure source coordinates are in bounds
             if (srcX >= 0 && srcX < 28 && srcY >= 0 && srcY < 28) {
                 // Copy pixel to the centered position in the processed canvas
@@ -677,6 +689,8 @@ void preprocessCanvas(uint8_t *canvas, uint8_t *processedCanvas) {
 void visualizeHOGFeatures(DrawingUI *ui, double *features, uint8_t predictedClass) {
     // Clear the visualization
     memset(&gHOGViz.featureMap, 0, sizeof(gHOGViz.featureMap));
+    memset(&gHOGViz.cellStrengths, 0, sizeof(gHOGViz.cellStrengths));
+    memcpy(gHOGViz.originalImage, ui->processedCanvas, 28*28); // Store original image
     gHOGViz.hasData = 0;  // Set to 0 initially, will set to 1 when successful
     
     // Early return if invalid inputs
@@ -743,7 +757,7 @@ void visualizeHOGFeatures(DrawingUI *ui, double *features, uint8_t predictedClas
         featureImportance[f] = importance;
     }
     
-    // Map feature importance back to image pixels
+    // Map feature importance back to image pixels and store cell strengths
     for (int f = 0; f < ui->model->numFeatures; f++) {
         // Calculate which cell this feature belongs to
         int binIndex = f % numBins;
@@ -755,6 +769,9 @@ void visualizeHOGFeatures(DrawingUI *ui, double *features, uint8_t predictedClas
         if (cellY >= cellsY || cellX >= cellsX) {
             continue;
         }
+        
+        // Store cell strength for this orientation bin
+        gHOGViz.cellStrengths[cellY][cellX][binIndex] = featureImportance[f];
         
         // For each pixel in this cell, add the feature importance
         for (int y = 0; y < cellSize; y++) {
@@ -904,56 +921,107 @@ void renderHOGVisualization(SDL_Renderer *renderer, int x, int y, int size) {
     }
     
     // Draw title
-    renderText(renderer, x, y - 30, "HOG Feature Importance", BLACK);
-    renderText(renderer, x, y - 10, "Red = Strong Feature for This Class", BLACK);
+    renderText(renderer, x, y - 30, "HOG Feature Visualization", BLACK);
     
     // Draw background
     SDL_Rect bgRect = {x, y, size, size};
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderFillRect(renderer, &bgRect);
     
-    // Draw the HOG heatmap
+    // First, draw the original processed letter as a background
     for (int py = 0; py < 28; py++) {
         for (int px = 0; px < 28; px++) {
-            double val = gHOGViz.featureMap[py][px];
-            
-            // Only draw significant values
-            if (val < 0.05) continue;
-            
-            // Scale pixel coordinates to display size
-            int dispX = x + px * size / 28;
-            int dispY = y + py * size / 28;
-            int pixSize = size / 28 + 1;  // +1 to avoid gaps
-            
-            // Create a color based on importance
-            // Red = high importance, Blue = low importance
-            uint8_t r = (uint8_t)(val * 255);
-            uint8_t g = 0;
-            uint8_t b = (uint8_t)((1.0 - val) * 255);
-            uint8_t a = (uint8_t)(val * 200 + 55);  // More important = more opaque
-            
-            // Draw the pixel
-            SDL_Rect pixRect = {dispX, dispY, pixSize, pixSize};
-            SDL_SetRenderDrawColor(renderer, r, g, b, a);
-            SDL_RenderFillRect(renderer, &pixRect);
+            if (gHOGViz.originalImage[py * 28 + px] > 50) {
+                // Scale pixel coordinates to display size
+                int dispX = x + px * size / 28;
+                int dispY = y + py * size / 28;
+                int pixSize = size / 28 + 1; // +1 to avoid gaps
+                
+                SDL_Rect pixRect = {dispX, dispY, pixSize, pixSize};
+                SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255); // Light gray for background
+                SDL_RenderFillRect(renderer, &pixRect);
+            }
         }
     }
     
-    // Draw original image overlay (faint)
-    for (int py = 0; py < 28; py++) {
-        for (int px = 0; px < 28; px++) {
-            if (gHOGViz.hasData && py < 28 && px < 28) {
-                int dispX = x + px * size / 28;
-                int dispY = y + py * size / 28;
-                int pixSize = size / 28 + 1;
+    // Now draw the HOG arrows overlaid on the image
+    int cellSize = CELL_SIZE;
+    int cellsX = 28 / cellSize;
+    int cellsY = 28 / cellSize;
+    int numBins = NUM_BINS;
+    
+    for (int cy = 0; cy < cellsY; cy++) {
+        for (int cx = 0; cx < cellsX; cx++) {
+            // Calculate cell center in display coordinates
+            int centerX = x + (cx * cellSize + cellSize/2) * size / 28;
+            int centerY = y + (cy * cellSize + cellSize/2) * size / 28;
+            
+            // Arrow length based on cell size
+            int arrowLength = (size / 28) * cellSize / 2;
+            
+            // Get strongest orientations for this cell
+            int cellIdx = (cy * cellsX + cx) * numBins;
+            double maxMagnitude = 0.0;
+            int dominantBins[3] = {-1, -1, -1};
+            double dominantMags[3] = {0.0, 0.0, 0.0};
+            
+            // Find top 3 dominant orientations
+            for (int bin = 0; bin < numBins; bin++) {
+                double magnitude = gHOGViz.cellStrengths[cy][cx][bin];
                 
-                // Only draw if the pixel is set in the original image
-                if (gHOGViz.hasData && 
-                    gHOGViz.featureMap[py][px] < 0.05) { // Low importance original pixels
+                // Insert in sorted order
+                for (int i = 0; i < 3; i++) {
+                    if (magnitude > dominantMags[i]) {
+                        // Shift down
+                        for (int j = 2; j > i; j--) {
+                            dominantBins[j] = dominantBins[j-1];
+                            dominantMags[j] = dominantMags[j-1];
+                        }
+                        dominantBins[i] = bin;
+                        dominantMags[i] = magnitude;
+                        break;
+                    }
+                }
+                
+                if (magnitude > maxMagnitude) {
+                    maxMagnitude = magnitude;
+                }
+            }
+            
+            // Draw arrows for the dominant orientations
+            for (int i = 0; i < 3; i++) {
+                if (dominantBins[i] >= 0 && dominantMags[i] > 0.1) { // Only draw significant orientations
+                    // Calculate orientation angle in radians
+                    double angle = dominantBins[i] * M_PI / numBins;
                     
-                    SDL_Rect pixRect = {dispX, dispY, pixSize, pixSize};
-                    SDL_SetRenderDrawColor(renderer, 100, 100, 100, 40);  // Very faint gray
-                    SDL_RenderFillRect(renderer, &pixRect);
+                    // Arrow start point
+                    int startX = centerX - (int)(arrowLength * cos(angle) * dominantMags[i] / maxMagnitude);
+                    int startY = centerY - (int)(arrowLength * sin(angle) * dominantMags[i] / maxMagnitude);
+                    
+                    // Arrow end point
+                    int endX = centerX + (int)(arrowLength * cos(angle) * dominantMags[i] / maxMagnitude);
+                    int endY = centerY + (int)(arrowLength * sin(angle) * dominantMags[i] / maxMagnitude);
+                    
+                    // Color based on magnitude (red for strong, blue for weak)
+                    int r = (int)(255 * dominantMags[i] / maxMagnitude);
+                    int b = 255 - r;
+                    
+                    // Draw arrow line
+                    SDL_SetRenderDrawColor(renderer, r, 0, b, 255);
+                    SDL_RenderDrawLine(renderer, startX, startY, endX, endY);
+                    
+                    // Draw arrowhead
+                    double headAngle1 = angle + 3 * M_PI / 4;
+                    double headAngle2 = angle - 3 * M_PI / 4;
+                    int headLength = arrowLength / 3;
+                    
+                    int head1X = endX - (int)(headLength * cos(headAngle1));
+                    int head1Y = endY - (int)(headLength * sin(headAngle1));
+                    int head2X = endX - (int)(headLength * cos(headAngle2));
+                    int head2Y = endY - (int)(headLength * sin(headAngle2));
+                    
+                    SDL_RenderDrawLine(renderer, endX, endY, head1X, head1Y);
+                    SDL_RenderDrawLine(renderer, endX, endY, head2X, head2Y);
                 }
             }
         }
