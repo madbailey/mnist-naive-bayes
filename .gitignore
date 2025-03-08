@@ -1,2 +1,6 @@
 /.vscode/
 /mnist
+bin/interactive_recognizer
+obj/main_interactive.o
+obj/mnist_loader.o
+obj/ui_drawer.o

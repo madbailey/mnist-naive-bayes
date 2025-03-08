@@ -57,9 +57,18 @@ int main(int argc, char *argv[]) {
 
     // Load training data
     printf("Loading training data...\n");
-    if (!loadMNISTDataset(imageFile, labelFile, &trainDataset)) {
-        printf("Failed to load training data. Check that files exist in the data/ directory.\n");
-        return 1;
+    if (recognizeLetters) {
+        // Use EMNIST-specific loader for letters
+        if (!loadEMNISTDataset(imageFile, labelFile, &trainDataset)) {
+            printf("Failed to load training data. Check that files exist in the data/ directory.\n");
+            return 1;
+        }
+    } else {
+        // Use standard loader for digits
+        if (!loadMNISTDataset(imageFile, labelFile, &trainDataset)) {
+            printf("Failed to load training data. Check that files exist in the data/ directory.\n");
+            return 1;
+        }
     }
     printf("Loaded %u training images\n", trainDataset.numImages);
     

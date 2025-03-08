@@ -112,6 +112,74 @@ void freeMNISTDataset(MNISTDataset *dataset) {
     dataset->labels = NULL;
 }
 
+// Create a new function in mnist_loader.c for loading EMNIST data specifically
+int loadEMNISTDataset(const char *imageFilename, const char *labelFilename, MNISTDataset *dataset) {
+    // First, load the dataset normally
+    if (!loadMNISTDataset(imageFilename, labelFilename, dataset)) {
+        return 0; // Return if loading fails
+    }
+    
+    // Then transform each image to correct EMNIST orientation
+    printf("Transforming EMNIST images to standard orientation...\n");
+    for (uint32_t i = 0; i < dataset->numImages; i++) {
+        transformEMNISTImage(&dataset->images[i * dataset->imageSize], dataset->rows, dataset->cols);
+        
+        // Print progress for large datasets
+        if ((i + 1) % 10000 == 0 || i + 1 == dataset->numImages) {
+            printf("Transformed %u/%u images\n", i + 1, dataset->numImages);
+        }
+    }
+    
+    return 1;
+}
+
+void transformEMNISTImageBetter(uint8_t *src, uint32_t size, uint8_t *dst, int rotationAngle) {
+    rotationAngle = rotationAngle % 360;
+    if (rotationAngle < 0) rotationAngle += 360;
+
+    if (rotationAngle == 0) {
+        memcpy(dst, src, size * size);
+    }
+    else if (rotationAngle == 90) {
+        for (uint32_t r = 0; r < size; r++) {
+            for (uint32_t c = 0; c < size; c++) {
+                dst[c * size + (size - 1 - r)] = src[r * size + c];
+            }
+        }
+    }
+    else if (rotationAngle == 180) {
+        for (uint32_t r = 0; r < size; r++) {
+            for (uint32_t c = 0; c < size; c++) {
+                dst[(size - 1 - r) * size + (size - 1 - c)] = src[r * size + c];
+            }
+        }
+    }
+    else if (rotationAngle == 270) {
+        for (uint32_t r = 0; r < size; r++) {
+            for (uint32_t c = 0; c < size; c++) {
+                dst[r * size + c] = src[c * size + (size - 1 - r)];
+            }
+        }
+    }
+}
+
+// Updated transformEMNISTImage function in mnist_loader.c
+void transformEMNISTImage(uint8_t *image, uint32_t rows, uint32_t cols) {
+    // Assume square images (e.g., 28x28)
+    uint32_t size = rows;  
+    uint8_t *temp = (uint8_t*)malloc(size * size);
+    if (!temp) {
+        printf("Failed to allocate memory for EMNIST transformation\n");
+        return;
+    }
+    
+    // Use the improved transformer with the desired rotation angle.
+    // Try 270 degrees if that gives the correct orientation.
+    transformEMNISTImageBetter(image, size, temp, 270);
+    
+    memcpy(image, temp, size * size);
+    free(temp);
+}
 // Function to display an image as ASCII art
 void displayMNISTImage(uint8_t *image, uint32_t rows, uint32_t cols) {
     for (uint32_t i = 0; i < rows; i++) {

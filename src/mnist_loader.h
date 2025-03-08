@@ -19,7 +19,7 @@ int loadMNISTDataset(const char *imageFilename, const char *labelFilename,
 
 // Function to free the dataset
 void freeMNISTDataset(MNISTDataset *dataset);
-
+void transformEMNISTImage(uint8_t *image, uint32_t rows, uint32_t cols);
 // Function to display an image as ASCII art
 void displayMNISTImage(uint8_t *image, uint32_t rows, uint32_t cols);
 

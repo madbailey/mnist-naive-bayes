@@ -811,17 +811,26 @@ void visualizeHOGFeatures(DrawingUI *ui, double *features, uint8_t predictedClas
 // Load reference samples from the training dataset
 int loadReferenceSamples(const char* imageFile, const char* labelFile) {
     MNISTDataset refDataset;
+    int isEMNIST = (strstr(imageFile, "emnist") != NULL);
 
-    // Load the dataset
-    if (!loadMNISTDataset(imageFile, labelFile, &refDataset)) {
-        printf("Failed to load reference samples\n");
-        return 0;
+    if (isEMNIST) {
+        if (!loadEMNISTDataset(imageFile, labelFile, &refDataset)) {
+            printf("Failed to load reference samples\n");
+            return 0;
+        }
+    } else {
+        if (!loadMNISTDataset(imageFile, labelFile, &refDataset)) {
+            printf("Failed to load reference samples\n");
+            return 0;
+        }
     }
 
     // Adjust labels to be 0-based
-    for (uint32_t i = 0; i < refDataset.numImages; i++) {
-        if (refDataset.labels[i] > 0) {
-            refDataset.labels[i] -= 1;  // Make 1-25 into 0-24
+    if (isEMNIST) {
+        for (uint32_t i = 0; i < refDataset.numImages; i++) {
+            if (refDataset.labels[i] > 0) {
+                refDataset.labels[i] -= 1;  // Make 1-26 into 0-25
+            }
         }
     }
 
