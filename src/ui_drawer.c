@@ -6,6 +6,7 @@
 #include <SDL2/SDL_ttf.h>
 #include "ui_drawer.h"
 #include "hog.h"
+#include "normalization.h"
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
@@ -610,80 +611,25 @@ void clearCanvas(DrawingUI *ui) {
 }
 
 void preprocessCanvas(uint8_t *canvas, uint8_t *processedCanvas) {
-    // Step 1: Find the bounding box of the drawn character
-    int minX = 28, minY = 28, maxX = 0, maxY = 0;
-    int hasContent = 0;
-
-    for (int y = 0; y < 28; y++) {
-        for (int x = 0; x < 28; x++) {
-            if (canvas[y * 28 + x] > 50) {
-                hasContent = 1;
-                if (x < minX) minX = x;
-                if (y < minY) minY = y;
-                if (x > maxX) maxX = x;
-                if (y > maxY) maxY = y;
-            }
-        }
-    }
-
-    // If no content, return empty canvas
-    if (!hasContent) {
-        memset(processedCanvas, 0, 28 * 28);
-        return;
-    }
-
-    // Step 2: Initialize processed canvas to zeros
-    memset(processedCanvas, 0, 28 * 28);
-
-    // Step 3: Calculate dimensions and center offset
-    int width = maxX - minX + 1;
-    int height = maxY - minY + 1;
+    // Create preprocessing options
+    PreprocessingOptions options;
+    initDefaultPreprocessing(&options);
     
-    // Use a more conservative padding (10% instead of 20%)
-    int paddingX = width / 10;
-    int paddingY = height / 10;
+    // You can customize options based on UI needs
+    options.applyNormalization = 1;     // Apply size/position normalization
+    options.applyThresholding = 1;      // Apply adaptive thresholding
+    options.applySlantCorrection = 1;   // Apply slant correction
+    options.applyNoiseRemoval = 1;      // Apply noise removal
+    options.applyStrokeNorm = 1;        // Apply stroke width normalization
+    options.applyThinning = 0;          // Skip thinning for better recognition
     
-    // Calculate new dimensions with padding
-    int newWidth = width + 2 * paddingX;
-    int newHeight = height + 2 * paddingY;
+    // Set appropriate parameters for interactive drawing
+    options.borderSize = 2;             // Border padding after normalization
+    options.targetStrokeWidth = 2;      // Target stroke width
+    options.noiseThreshold = 1;         // More aggressive noise removal for drawn input
     
-    // Determine scaling factor to fit in 28x28 while preserving aspect ratio
-    float scaleX = 28.0f / newWidth;
-    float scaleY = 28.0f / newHeight;
-    float scale = (scaleX < scaleY) ? scaleX : scaleY;
-    
-    // Calculate the final dimensions after scaling
-    int finalWidth = (int)(width * scale);
-    int finalHeight = (int)(height * scale);
-    
-    // Calculate centering offsets
-    int offsetX = (28 - finalWidth) / 2;
-    int offsetY = (28 - finalHeight) / 2;
-    
-    // Ensure offsets are not negative
-    offsetX = (offsetX < 0) ? 0 : offsetX;
-    offsetY = (offsetY < 0) ? 0 : offsetY;
-
-    // Step 4: Scale and center the content with proper aspect ratio
-    for (int y = 0; y < finalHeight; y++) {
-        for (int x = 0; x < finalWidth; x++) {
-            // Map the destination (x,y) back to source coordinates
-            int srcX = minX + (int)(x / scale);
-            int srcY = minY + (int)(y / scale);
-            
-            // Ensure source coordinates are in bounds
-            if (srcX >= 0 && srcX < 28 && srcY >= 0 && srcY < 28) {
-                // Copy pixel to the centered position in the processed canvas
-                processedCanvas[(offsetY + y) * 28 + (offsetX + x)] = canvas[srcY * 28 + srcX];
-            }
-        }
-    }
-
-    // Step 5: Apply thresholding and normalization
-    for (int i = 0; i < 28 * 28; i++) {
-        // Binary thresholding
-        processedCanvas[i] = (processedCanvas[i] > 30) ? 255 : 0;
-    }
+    // Use the full preprocessing pipeline from normalization.c
+    preprocessImage(canvas, processedCanvas, 28, 28, &options);
 }
 // Replace the entire visualizeHOGFeatures() function with this improved version
 void visualizeHOGFeatures(DrawingUI *ui, double *features, uint8_t predictedClass) {

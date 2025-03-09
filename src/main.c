@@ -5,6 +5,7 @@
 #include "hog.h"
 #include "naive_bayes.h"
 #include "utils.h"
+#include "normalization.h"
 
 // Function to convert numeric label to character
 char labelToChar(uint8_t label) {
@@ -26,8 +27,10 @@ void adjustLabels(MNISTDataset *dataset) {
 
 int main() {
     MNISTDataset trainDataset, testDataset;
+    MNISTDataset processedTrainDataset, processedTestDataset; // New preprocessed datasets
     HOGFeatures trainHOG, testHOG;
     NaiveBayesModel model;
+    PreprocessingOptions preOptions; // Preprocessing options
     
     int cellSize = 4;
     int numBins = 9;
@@ -58,19 +61,40 @@ int main() {
     adjustLabels(&trainDataset);
     adjustLabels(&testDataset);
 
-    // Initialize HOG feature structures
-    trainHOG.numImages = trainDataset.numImages;
-    trainHOG.numFeatures = (trainDataset.rows/cellSize) * (trainDataset.cols/cellSize) * numBins;
+    // Initialize preprocessing options with defaults
+    initDefaultPreprocessing(&preOptions);
     
-    testHOG.numImages = testDataset.numImages;
-    testHOG.numFeatures = (testDataset.rows/cellSize) * (testDataset.cols/cellSize) * numBins;
+    // Preprocess training data
+    printf("Preprocessing training data...\n");
+    preprocessDataset(&trainDataset, &processedTrainDataset, &preOptions);
+    
+    // Preprocess test data
+    printf("Preprocessing test data...\n");
+    preprocessDataset(&testDataset, &processedTestDataset, &preOptions);
+    
+    // Debug: print some stats about the preprocessed datasets
+    printf("Preprocessed training set: %u images, %ux%u size\n", 
+           processedTrainDataset.numImages, 
+           processedTrainDataset.rows, 
+           processedTrainDataset.cols);
+    printf("Preprocessed test set: %u images, %ux%u size\n", 
+           processedTestDataset.numImages, 
+           processedTestDataset.rows, 
+           processedTestDataset.cols);
 
-    // Extract HOG features
-    printf("Extracting HOG features from training letters...\n");
-    extractHOGFeatures(&trainDataset, &trainHOG, cellSize, numBins);
+    // Initialize HOG feature structures for preprocessed data
+    trainHOG.numImages = processedTrainDataset.numImages;
+    trainHOG.numFeatures = (processedTrainDataset.rows/cellSize) * (processedTrainDataset.cols/cellSize) * numBins;
+    
+    testHOG.numImages = processedTestDataset.numImages;
+    testHOG.numFeatures = (processedTestDataset.rows/cellSize) * (processedTestDataset.cols/cellSize) * numBins;
 
-    printf("Extracting HOG features from test letters...\n");
-    extractHOGFeatures(&testDataset, &testHOG, cellSize, numBins);
+    // Extract HOG features from preprocessed data
+    printf("Extracting HOG features from preprocessed training letters...\n");
+    extractHOGFeatures(&processedTrainDataset, &trainHOG, cellSize, numBins);
+
+    printf("Extracting HOG features from preprocessed test letters...\n");
+    extractHOGFeatures(&processedTestDataset, &testHOG, cellSize, numBins);
 
     // Initialize and train the model
     printf("Training letter recognition model...\n");
@@ -161,9 +185,11 @@ int main() {
         printf("%c\t%.2f%%\n", labelToChar(i+1), letterAccuracy);
     }
     
-    // Free memory
+    // Free memory for both original and preprocessed datasets
     freeMNISTDataset(&trainDataset);
     freeMNISTDataset(&testDataset);
+    freeMNISTDataset(&processedTrainDataset);
+    freeMNISTDataset(&processedTestDataset);
     freeHOGFeatures(&trainHOG);
     freeHOGFeatures(&testHOG);
     freeNaiveBayes(&model);

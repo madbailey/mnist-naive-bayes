@@ -8,8 +8,8 @@ BIN_DIR = bin
 # Get all source files
 ALL_SRCS = $(wildcard $(SRC_DIR)/*.c)
 
-# Normal classifier (exclude the interactive main)
-CLASSIFIER_SRCS = $(filter-out $(SRC_DIR)/main_interactive.c, $(ALL_SRCS))
+# Normal classifier (exclude the interactive main and UI components)
+CLASSIFIER_SRCS = $(filter-out $(SRC_DIR)/main_interactive.c $(SRC_DIR)/ui_drawer.c, $(ALL_SRCS))
 CLASSIFIER_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(CLASSIFIER_SRCS))
 CLASSIFIER_EXEC = $(BIN_DIR)/mnist_classifier
 

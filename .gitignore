@@ -1,6 +1,8 @@
 /.vscode/
-/mnist
+data/*
+obj/*
+bin/*
+CLAUDE.md
 bin/interactive_recognizer
 obj/main_interactive.o
-obj/mnist_loader.o
 obj/ui_drawer.o
