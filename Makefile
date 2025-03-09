@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g
+CFLAGS = -Wall -Wextra -g -I/root/projects/mnist/external/raylib-master/src
 
 SRC_DIR = src
 OBJ_DIR = obj
@@ -18,8 +18,8 @@ INTERACTIVE_SRCS = $(filter-out $(SRC_DIR)/main.c, $(ALL_SRCS))
 INTERACTIVE_OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(INTERACTIVE_SRCS))
 INTERACTIVE_EXEC = $(BIN_DIR)/interactive_recognizer
 
-# SDL flags for the interactive app
-SDL_FLAGS = -lSDL2 -lSDL2_ttf
+# Raylib flags for the interactive app
+RAYLIB_FLAGS = -L/root/projects/mnist/external/raylib-master/src -lraylib -lm -lpthread -ldl -lX11
 
 # Default target builds both
 all: directories classifier interactive
@@ -37,9 +37,9 @@ directories:
 $(CLASSIFIER_EXEC): $(CLASSIFIER_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
-# Interactive app with SDL
+# Interactive app with Raylib
 $(INTERACTIVE_EXEC): $(INTERACTIVE_OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ -lm $(SDL_FLAGS)
+	$(CC) $(CFLAGS) -o $@ $^ -lm $(RAYLIB_FLAGS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@

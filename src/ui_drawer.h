@@ -1,7 +1,7 @@
 #ifndef UI_DRAWER_H
 #define UI_DRAWER_H
 
-#include <SDL2/SDL.h>
+#include "raylib.h"
 #include "naive_bayes.h"
 #include "hog.h"
 #include "specialized_classifier.h"
@@ -14,9 +14,6 @@
 
 // Structure to hold UI components
 typedef struct {
-    SDL_Window *window;
-    SDL_Renderer *renderer;
-    SDL_Texture *canvasTexture;
     uint8_t canvas[28*28];         // 28x28 pixel canvas for drawing
     uint8_t processedCanvas[28*28]; // Processed version for debugging
     int vizMode;                    // Visualization mode flag
@@ -41,7 +38,6 @@ typedef struct {
     uint8_t originalImage[28*28];  // Copy of the original processed image
     int hasData;                   // Flag indicating if visualization data is available
 } HOGVisualization;
-
 
 // Structure to hold reference samples
 typedef struct {
@@ -82,10 +78,10 @@ int loadReferenceSamples(const char* imageFile, const char* labelFile);
 void visualizeHOGFeatures(DrawingUI *ui, double *features, uint8_t predictedClass);
 
 // Render HOG visualization
-void renderHOGVisualization(SDL_Renderer *renderer, int x, int y, int size);
+void renderHOGVisualization(int x, int y, int size);
 
 // Render reference samples
-void renderReferenceSamples(SDL_Renderer *renderer, int x, int y, int width, int height, int letterIndex);
+void renderReferenceSamples(int x, int y, int width, int height, int letterIndex);
 
 // Change visualization mode
 void cycleVisualizationMode(DrawingUI *ui);

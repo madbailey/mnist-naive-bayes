@@ -331,9 +331,8 @@ int main(int argc, char *argv[]) {
     while (running) {
         running = processEvents(&ui);
         renderUI(&ui);
-
-        // Cap to ~60 FPS
-        SDL_Delay(16);
+        
+        // The frame rate is handled by Raylib with SetTargetFPS in initUI
     }
 
     // Clean up
