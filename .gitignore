@@ -6,3 +6,7 @@ CLAUDE.md
 bin/interactive_recognizer
 obj/main_interactive.o
 obj/ui_drawer.o
+obj/main_interactive.o
+obj/naive_bayes.o
+obj/ui_drawer.o
+bin/interactive_recognizer

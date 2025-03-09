@@ -143,13 +143,43 @@ void trainNaiveBayes(NaiveBayesModel *model, HOGFeatures *hogFeatures) {
     printf("Trained HOG Naive Bayes model\n");
 }
 
-// Function to predict the digit for a single image
-// Function to predict the digit for a single image
+// Original function to predict the digit for a single image (for backward compatibility)
 uint8_t predictNaiveBayes(NaiveBayesModel *model, double *features) {
-    double maxLogProb = -INFINITY;
-    int bestClass = 0;
+    PredictionResult result = predictNaiveBayesWithConfidence(model, features, 1);
+    uint8_t prediction = result.prediction;
+    freePredictionResult(&result);
+    return prediction;
+}
+
+// Enhanced prediction function that returns confidence and top-N predictions
+PredictionResult predictNaiveBayesWithConfidence(NaiveBayesModel *model, double *features, int topN) {
+    PredictionResult result;
+    
+    // Ensure topN is within bounds
+    if (topN > model->numClasses) {
+        topN = model->numClasses;
+    }
+    if (topN < 1) {
+        topN = 1;
+    }
+    
+    // Allocate memory for class probabilities and top predictions
+    result.classProbs = (double*)malloc(model->numClasses * sizeof(double));
+    result.topN = (uint8_t*)malloc(topN * sizeof(uint8_t));
+    result.n = topN;
+    
+    // Initialize arrays
+    for (int c = 0; c < model->numClasses; c++) {
+        result.classProbs[c] = 0.0;
+    }
+    
+    for (int i = 0; i < topN; i++) {
+        result.topN[i] = 0;
+    }
     
     // Calculate log probability for each class
+    double *logProbs = (double*)malloc(model->numClasses * sizeof(double));
+    
     for (int c = 0; c < model->numClasses; c++) {
         double logProb = log(model->classPrior[c]);
         
@@ -173,13 +203,95 @@ uint8_t predictNaiveBayes(NaiveBayesModel *model, double *features) {
             logProb += log(prob);
         }
         
-        if (logProb > maxLogProb) {
-            maxLogProb = logProb;
-            bestClass = c;
+        logProbs[c] = logProb;
+    }
+    
+    // Convert log probabilities to actual probabilities (normalized)
+    double maxLogProb = -INFINITY;
+    for (int c = 0; c < model->numClasses; c++) {
+        if (logProbs[c] > maxLogProb) {
+            maxLogProb = logProbs[c];
         }
     }
     
-    return (uint8_t)bestClass;
+    double sumProb = 0.0;
+    for (int c = 0; c < model->numClasses; c++) {
+        // Subtract maxLogProb to avoid numerical instability
+        result.classProbs[c] = exp(logProbs[c] - maxLogProb);
+        sumProb += result.classProbs[c];
+    }
+    
+    // Normalize
+    for (int c = 0; c < model->numClasses; c++) {
+        result.classProbs[c] /= sumProb;
+    }
+    
+    // Find top N predictions
+    for (int i = 0; i < topN; i++) {
+        double maxProb = -1;
+        int maxIdx = -1;
+        
+        for (int c = 0; c < model->numClasses; c++) {
+            if (result.classProbs[c] > maxProb) {
+                maxProb = result.classProbs[c];
+                maxIdx = c;
+            }
+        }
+        
+        if (maxIdx >= 0) {
+            result.topN[i] = (uint8_t)maxIdx;
+            result.classProbs[maxIdx] = -1;  // Mark as used
+        }
+    }
+    
+    // Restore class probabilities (undo the marking)
+    for (int c = 0; c < model->numClasses; c++) {
+        if (result.classProbs[c] < 0) {
+            // Find the position in topN to determine the rank
+            for (int i = 0; i < topN; i++) {
+                if (result.topN[i] == c) {
+                    // Restore probability based on the normalized log probability
+                    result.classProbs[c] = exp(logProbs[c] - maxLogProb) / sumProb;
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Set the prediction to the top class
+    result.prediction = result.topN[0];
+    
+    // Calculate confidence as the difference between top two probabilities
+    double topProb = result.classProbs[result.topN[0]];
+    double runnerUpProb = (topN > 1) ? result.classProbs[result.topN[1]] : 0.0;
+    
+    // Confidence can be calculated in different ways:
+    // 1. Simple probability: result.confidence = topProb;
+    // 2. Margin between top two: result.confidence = topProb - runnerUpProb;
+    // 3. Normalized margin: result.confidence = (topProb - runnerUpProb) / topProb;
+    
+    // We'll use the simple probability approach for better interpretability
+    result.confidence = topProb;
+    
+    // Clean up temporary array
+    free(logProbs);
+    
+    return result;
+}
+
+// Free prediction result resources
+void freePredictionResult(PredictionResult *result) {
+    if (result->classProbs) {
+        free(result->classProbs);
+        result->classProbs = NULL;
+    }
+    
+    if (result->topN) {
+        free(result->topN);
+        result->topN = NULL;
+    }
+    
+    result->n = 0;
 }
 
 void freeNaiveBayes(NaiveBayesModel *model) {

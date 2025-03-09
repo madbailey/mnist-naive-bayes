@@ -57,7 +57,7 @@ char getLabelChar(int label, int showingLetters) {
     }
 }
 // Initialize the drawing UI
-int initUI(DrawingUI *ui, NaiveBayesModel *model, int numClasses, int showLetters) {
+int initUI(DrawingUI *ui, NaiveBayesModel *model, SpecializedClassifierManager *manager, int numClasses, int showLetters) {
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         printf("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
@@ -123,12 +123,39 @@ int initUI(DrawingUI *ui, NaiveBayesModel *model, int numClasses, int showLetter
     ui->showProcessed = 0;                  // Initialize showProcessed flag
     ui->drawing = 0;
     ui->model = model;
+    ui->specializedManager = manager;
     ui->numClasses = numClasses;
     ui->showingLetters = showLetters;
     ui->prediction = -1;  // No prediction yet
     ui->lastFeatures = NULL;  // Initialize lastFeatures
     ui->lastFeaturesCount = 0;  // Initialize lastFeaturesCount
+    ui->selectedFeatureIndices = NULL;  // Initialize selected feature indices
+    ui->numSelectedFeatures = 0;  // Initialize number of selected features
     memset(ui->confidence, 0, sizeof(ui->confidence));
+    
+    // Try to load selected feature indices if available
+    FILE *featureIdxFile = fopen("selected_features.dat", "rb");
+    if (featureIdxFile) {
+        // Read number of selected features
+        if (fread(&ui->numSelectedFeatures, sizeof(uint32_t), 1, featureIdxFile) == 1) {
+            // Allocate memory for selected feature indices
+            ui->selectedFeatureIndices = (uint32_t *)malloc(ui->numSelectedFeatures * sizeof(uint32_t));
+            if (ui->selectedFeatureIndices) {
+                // Read selected feature indices
+                if (fread(ui->selectedFeatureIndices, sizeof(uint32_t), ui->numSelectedFeatures, featureIdxFile) 
+                    != ui->numSelectedFeatures) {
+                    // Failed to read all indices
+                    free(ui->selectedFeatureIndices);
+                    ui->selectedFeatureIndices = NULL;
+                    ui->numSelectedFeatures = 0;
+                    printf("WARNING: Failed to read all selected feature indices\n");
+                } else {
+                    printf("Loaded %u selected feature indices\n", ui->numSelectedFeatures);
+                }
+            }
+        }
+        fclose(featureIdxFile);
+    }
 
     // Initialize prediction flags
     canvasDirty = 0;
@@ -154,6 +181,12 @@ void cleanupUI(DrawingUI *ui) {
     if (ui->lastFeatures != NULL) {
         free(ui->lastFeatures);
         ui->lastFeatures = NULL;
+    }
+    
+    // Free selected feature indices
+    if (ui->selectedFeatureIndices != NULL) {
+        free(ui->selectedFeatureIndices);
+        ui->selectedFeatureIndices = NULL;
     }
 
     if (ui->canvasTexture != NULL) {
@@ -481,14 +514,56 @@ void renderUI(DrawingUI *ui) {
         char predText[100];
         char label = getLabelChar(ui->prediction, ui->showingLetters);
 
+        // Define commonly confused pairs
+        typedef struct {
+            uint8_t class1;
+            uint8_t class2;
+            const char *pairName;
+        } ConfusedPair;
+        
+        // Initialize with known confused pairs (in zero-based indices)
+        ConfusedPair confusedPairs[] = {
+            {8, 11, "i/l"},    // 'i' and 'l'
+            {14, 20, "o/u"},   // 'o' and 'u'
+            {2, 6, "c/g"}      // 'c' and 'g'
+        };
+        int numConfusedPairs = sizeof(confusedPairs) / sizeof(confusedPairs[0]);
+        
+        // Check if current prediction is part of a confused pair
+        int isConfusedPair = 0;
+        const char *confusedPairName = NULL;
+        for (int i = 0; i < numConfusedPairs; i++) {
+            if (ui->prediction == confusedPairs[i].class1 || 
+                ui->prediction == confusedPairs[i].class2) {
+                isConfusedPair = 1;
+                confusedPairName = confusedPairs[i].pairName;
+                break;
+            }
+        }
+
+        // Highlight confused pairs in red, others in blue
+        SDL_Color predColor = isConfusedPair ? RED : BLUE;
+        
         sprintf(predText, "Prediction: %c", label);
-        renderText(ui->renderer, 350, 140, predText, BLUE);
+        renderText(ui->renderer, 350, 140, predText, predColor);
 
         sprintf(predText, "Confidence: %.2f%%", ui->confidence[ui->prediction] * 100.0);
-        renderText(ui->renderer, 350, 170, predText, BLUE);
+        renderText(ui->renderer, 350, 170, predText, predColor);
+        
+        // Add notice if this is a letter in a frequently confused pair
+        if (isConfusedPair && ui->showingLetters) {
+            sprintf(predText, "(Frequently confused pair: %s)", confusedPairName);
+            renderText(ui->renderer, 350, 200, predText, RED);
+            
+            // Show info about the specialized classifier
+            if (ui->specializedManager && ui->specializedManager->numClassifiers > 0) {
+                renderText(ui->renderer, 350, 230, "Using specialized classifier", GREEN);
+            }
+        }
 
         // Show top 5 predictions with confidences
-        renderText(ui->renderer, 350, 210, "Top Predictions:", BLACK);
+        int topInfoY = isConfusedPair ? 260 : 210;
+        renderText(ui->renderer, 350, topInfoY, "Top Predictions:", BLACK);
 
         // Find top 5 confidence scores
         int topIndices[5] = {-1, -1, -1, -1, -1};
@@ -516,8 +591,22 @@ void renderUI(DrawingUI *ui) {
             if (topIndices[i] >= 0) {
                 char topText[100];
                 char topLabel = getLabelChar(topIndices[i], ui->showingLetters);
+                
+                // Check if this class is part of a confused pair
+                int isConfused = 0;
+                for (int j = 0; j < numConfusedPairs; j++) {
+                    if (topIndices[i] == confusedPairs[j].class1 || 
+                        topIndices[i] == confusedPairs[j].class2) {
+                        isConfused = 1;
+                        break;
+                    }
+                }
+                
+                // Highlight confused classes in rankings
+                SDL_Color rankColor = isConfused ? RED : BLACK;
+                
                 sprintf(topText, "%c: %.2f%%", topLabel, topConfidences[i] * 100.0);
-                renderText(ui->renderer, 370, 240 + i*30, topText, BLACK);
+                renderText(ui->renderer, 370, topInfoY + 30 + i*30, topText, rankColor);
             }
         }
     }
@@ -855,7 +944,7 @@ int loadReferenceSamples(const char* imageFile, const char* labelFile) {
 
     return 1;
 }
-// Replace the renderHOGVisualization() function with this version
+// Improved HOG visualization function with feature selection awareness
 void renderHOGVisualization(SDL_Renderer *renderer, int x, int y, int size) {
     if (!gHOGViz.hasData) {
         // Draw placeholder if we don't have data
@@ -867,7 +956,7 @@ void renderHOGVisualization(SDL_Renderer *renderer, int x, int y, int size) {
     }
     
     // Draw title
-    renderText(renderer, x, y - 30, "HOG Feature Visualization", BLACK);
+    renderText(renderer, x, y - 30, "HOG Feature Visualization (Selected Features Highlighted)", BLACK);
     
     // Draw background
     SDL_Rect bgRect = {x, y, size, size};
@@ -1040,11 +1129,20 @@ void processPrediction(DrawingUI *ui) {
     // IMPORTANT: Calculate numFeatures the same way it was calculated during training
     int numFeatures = (28/cellSize) * (28/cellSize) * numBins;
     
-    // Verify feature dimensions match the model
-    if (numFeatures != ui->model->numFeatures) {
+    // Check if we're using feature selection
+    int useFeatureSelection = (ui->selectedFeatureIndices != NULL && ui->numSelectedFeatures > 0);
+    
+    // Verify feature dimensions match the model - accounting for feature selection
+    int expectedFeatures = useFeatureSelection ? ui->numSelectedFeatures : numFeatures;
+    
+    if (expectedFeatures != ui->model->numFeatures) {
         printf("ERROR: Feature dimension mismatch! Expected: %d, Got: %d\n", 
-               ui->model->numFeatures, numFeatures);
-        printf("This is likely due to a cell size mismatch between training and prediction.\n");
+               ui->model->numFeatures, expectedFeatures);
+        if (useFeatureSelection) {
+            printf("This might be due to a mismatch between the model and the loaded feature indices.\n");
+        } else {
+            printf("This is likely due to a cell size mismatch between training and prediction.\n");
+        }
         return;
     }
     
@@ -1076,66 +1174,58 @@ void processPrediction(DrawingUI *ui) {
     // Extract HOG features using the correct cell size
     extractHOGFeatures(&tempDataset, &hogFeatures, cellSize, numBins);
     
-    // Store all log probabilities
-    double *logProbs = (double*)malloc(ui->numClasses * sizeof(double));
-    if (logProbs == NULL) {
-        printf("Failed to allocate memory for log probabilities\n");
-        free(hogFeatures.features);
-        return;
-    }
+    // Create feature array for classification
+    double *selectedFeatures = NULL;
     
-    // Calculate log probabilities directly
-    double maxLogProb = -INFINITY;
-    int bestClass = 0;
-    
-    for (int c = 0; c < ui->numClasses; c++) {
-        // Start with class prior probability
-        double logProb = log(ui->model->classPrior[c]);
-        
-        // Add log probability for each feature
-        for (int f = 0; f < ui->model->numFeatures; f++) {
-            // Ensure feature value is in valid range
-            double featureVal = hogFeatures.features[f];
-            featureVal = (featureVal < 0) ? 0 : (featureVal > 1.0 ? 1.0 : featureVal);
-            
-            // Calculate bin index
-            int bin = (int)(featureVal / ui->model->binWidth);
-            bin = (bin < 0) ? 0 : (bin >= ui->model->numBins ? ui->model->numBins - 1 : bin);
-            
-            // Get probability for this feature, with safety check
-            double prob = ui->model->featureProb[c][f][bin];
-            prob = (prob < 1e-10) ? 1e-10 : prob;  // Prevent log(0)
-            
-            logProb += log(prob);
+    // If using feature selection, create a subset of features
+    if (useFeatureSelection) {
+        selectedFeatures = (double*)malloc(ui->numSelectedFeatures * sizeof(double));
+        if (!selectedFeatures) {
+            printf("Failed to allocate memory for selected features\n");
+            free(hogFeatures.features);
+            return;
         }
         
-        // Store this class's log probability
-        logProbs[c] = logProb;
-        
-        // Keep track of best class
-        if (logProb > maxLogProb) {
-            maxLogProb = logProb;
-            bestClass = c;
+        // Extract the selected features
+        for (uint32_t i = 0; i < ui->numSelectedFeatures; i++) {
+            uint32_t selectedIdx = ui->selectedFeatureIndices[i];
+            if (selectedIdx < hogFeatures.numFeatures) {
+                selectedFeatures[i] = hogFeatures.features[selectedIdx];
+            } else {
+                selectedFeatures[i] = 0.0; // Safety fallback
+            }
         }
+    } else {
+        // Use all features
+        selectedFeatures = hogFeatures.features;
     }
     
-    // Set prediction
-    ui->prediction = bestClass;
+    // Initialize prediction result
+    PredictionResult result;
+    int topN = ui->numClasses > 5 ? 5 : ui->numClasses; // Get top 5 or all if less than 5 classes
     
-    // Apply a temperature parameter to soften the confidence scores
-    double temperature = 2.5;  // Higher values = softer distribution
-    double totalProb = 0.0;
-    
-    // Convert log probabilities to actual probabilities using softmax with temperature
-    for (int c = 0; c < ui->numClasses; c++) {
-        ui->confidence[c] = exp((logProbs[c] - maxLogProb) / temperature);
-        totalProb += ui->confidence[c];
+    // Perform classification based on whether we're using specialized classifiers
+    if (ui->showingLetters && ui->specializedManager && ui->specializedManager->numClassifiers > 0) {
+        // Use the two-stage classification approach for letters
+        result = twoStageClassify(ui->model, ui->specializedManager, selectedFeatures, topN);
+        printf("Using two-stage classification for letters\n");
+    } else {
+        // Use regular classification for digits or if no specialized classifiers
+        result = predictNaiveBayesWithConfidence(ui->model, selectedFeatures, topN);
+        printf("Using standard classification\n");
     }
     
-    // Normalize to get confidence scores
-    if (totalProb > 0) {
-        for (int c = 0; c < ui->numClasses; c++) {
-            ui->confidence[c] /= totalProb;
+    // Update UI with the result
+    ui->prediction = result.prediction;
+    
+    // Set confidence scores for all classes
+    memset(ui->confidence, 0, sizeof(ui->confidence));
+    
+    // Set confidence for the top classes we got back
+    for (int i = 0; i < result.n; i++) {
+        if (i < ui->numClasses) {
+            uint8_t classIdx = result.topN[i];
+            ui->confidence[classIdx] = result.classProbs[classIdx];
         }
     }
     
@@ -1145,22 +1235,25 @@ void processPrediction(DrawingUI *ui) {
     
     // Print the prediction for debugging
     printf("Predicted: %c with confidence %.2f%%\n", 
-          ui->showingLetters ? 'A' + ui->prediction : '0' + ui->prediction,
-          ui->confidence[ui->prediction] * 100.0);
+           ui->showingLetters ? 'A' + ui->prediction : '0' + ui->prediction,
+           ui->confidence[ui->prediction] * 100.0);
     
     // Store the extracted features for visualization if in HOG mode
     if (ui->vizMode == VIZ_MODE_HOG) {
+        // Determine how many features to visualize (all or selected)
+        uint32_t numFeaturesToVisualize = hogFeatures.numFeatures;
+        
         // Allocate/reallocate memory for features if needed
-        if (ui->lastFeatures == NULL || ui->lastFeaturesCount != hogFeatures.numFeatures) {
+        if (ui->lastFeatures == NULL || ui->lastFeaturesCount != numFeaturesToVisualize) {
             // Free old memory if it exists
             if (ui->lastFeatures != NULL) {
                 free(ui->lastFeatures);
             }
             
             // Allocate new memory
-            ui->lastFeatures = (double*)malloc(hogFeatures.numFeatures * sizeof(double));
+            ui->lastFeatures = (double*)malloc(numFeaturesToVisualize * sizeof(double));
             if (ui->lastFeatures != NULL) {
-                ui->lastFeaturesCount = hogFeatures.numFeatures;
+                ui->lastFeaturesCount = numFeaturesToVisualize;
             } else {
                 ui->lastFeaturesCount = 0;
                 printf("Failed to allocate memory for feature storage\n");
@@ -1169,19 +1262,40 @@ void processPrediction(DrawingUI *ui) {
         
         // Copy features if memory allocation succeeded
         if (ui->lastFeatures != NULL) {
-            memcpy(ui->lastFeatures, hogFeatures.features, 
-                hogFeatures.numFeatures * sizeof(double));
+            // If using feature selection, create a subset of features for visualization
+            if (ui->selectedFeatureIndices != NULL && ui->numSelectedFeatures > 0) {
+                printf("Visualizing %u selected features\n", ui->numSelectedFeatures);
+                // Just highlight the selected features for visualization
+                for (uint32_t i = 0; i < numFeaturesToVisualize; i++) {
+                    // Initialize all features to a very low value
+                    ui->lastFeatures[i] = 0.01;
+                }
+                
+                // Then boost the selected features
+                for (uint32_t i = 0; i < ui->numSelectedFeatures; i++) {
+                    uint32_t selectedIdx = ui->selectedFeatureIndices[i];
+                    if (selectedIdx < numFeaturesToVisualize) {
+                        ui->lastFeatures[selectedIdx] = hogFeatures.features[selectedIdx] * 2.0;
+                    }
+                }
+            } else {
+                // Just copy all features for visualization if not using feature selection
+                memcpy(ui->lastFeatures, hogFeatures.features, 
+                    numFeaturesToVisualize * sizeof(double));
+            }
                 
             // Generate the HOG visualization
-            visualizeHOGFeatures(ui, hogFeatures.features, bestClass);
+            visualizeHOGFeatures(ui, ui->lastFeatures, ui->prediction);
         }
     }
-
-
     
     // Free allocated memory in reverse order of allocation
-    free(logProbs);
+    freePredictionResult(&result);
+    if (useFeatureSelection && selectedFeatures) {
+        free(selectedFeatures);
+    }
     free(hogFeatures.features);
+    
     // Add this right at the end of processPrediction() before returning
     // This makes sure we keep the processed view visible for better user feedback
     ui->showProcessed = 1;

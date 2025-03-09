@@ -4,6 +4,7 @@
 #include <SDL2/SDL.h>
 #include "naive_bayes.h"
 #include "hog.h"
+#include "specialized_classifier.h"
 
 // Flags for different visualization modes
 #define VIZ_MODE_NONE 0
@@ -22,12 +23,15 @@ typedef struct {
     int showProcessed;              // Flag to show processed view (for backward compatibility)
     int drawing;                    // Flag to track if we're currently drawing
     NaiveBayesModel *model;        // Pointer to our trained model
+    SpecializedClassifierManager *specializedManager; // Specialized classifier manager
     int numClasses;                // Number of classes (10 for digits, 26 for letters)
     int showingLetters;            // 0 for digits, 1 for letters
     double confidence[26];         // Confidence scores for each class
     int prediction;                // Current prediction
     double *lastFeatures;          // Store last extracted features for visualization
     int lastFeaturesCount;         // Number of features stored
+    uint32_t *selectedFeatureIndices; // Indices of selected features
+    uint32_t numSelectedFeatures;   // Number of selected features
 } DrawingUI;
 
 // Structure to hold HOG visualization data
@@ -51,7 +55,7 @@ extern HOGVisualization gHOGViz;
 extern ReferenceSamples gReferenceSamples;
 
 // Initialize the drawing UI
-int initUI(DrawingUI *ui, NaiveBayesModel *model, int numClasses, int showLetters);
+int initUI(DrawingUI *ui, NaiveBayesModel *model, SpecializedClassifierManager *manager, int numClasses, int showLetters);
 
 // Clean up resources
 void cleanupUI(DrawingUI *ui);
